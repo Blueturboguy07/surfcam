@@ -18,6 +18,11 @@ Zero engine installs. Node + npm only. Camera permission is asked once.
 3. Step left / right to change lane. The HUD strip shows which of the three camera zones you are in.
 4. Jump to jump. Crouch to roll under barriers. Jogging in place does nothing.
 
+**Game only** (default ON) hides everything on the Poki page except the game iframe and pins it to the full
+window. It is one injected stylesheet: every element `visibility: hidden`, `#game-element` visible and
+`position: fixed; inset: 0`. Nothing is reparented, so the game never reloads. Toggle it off if you need
+Poki's own UI. **Fullscreen** takes the whole app fullscreen (Esc exits).
+
 HUD buttons: `Keys: ON/OFF` (or `k`) pauses key sending so you can use the mouse on Poki's UI.
 `Recenter lane` (or `c`) tells the controller the character is back in the centre lane.
 

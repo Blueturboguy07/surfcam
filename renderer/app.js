@@ -63,13 +63,32 @@ async function focusGame() {
     log('focusGame ->', r);
   } catch (e) { log('focusGame failed', String(e)); }
 }
-game.addEventListener('dom-ready', () => { log('game dom-ready', game.getURL()); });
+// ---------- game-only mode: hide everything on the Poki page except the game iframe and pin it
+// to the full viewport. Same thing as deleting every other node in the inspector, done with
+// visibility so the iframe is never reparented (reparenting an iframe reloads it).
+const GAME_ONLY_CSS = `
+  html, body { overflow: hidden !important; background: #000 !important; }
+  body * { visibility: hidden !important; }
+  #game-element { visibility: visible !important; position: fixed !important; left: 0 !important; top: 0 !important;
+    width: 100vw !important; height: 100vh !important; z-index: 2147483647 !important; border: 0 !important; margin: 0 !important; }
+`;
+let gameOnly = true, gameOnlyKey = null;
+async function applyGameOnly() {
+  try {
+    if (gameOnlyKey) { await game.removeInsertedCSS(gameOnlyKey); gameOnlyKey = null; }
+    if (gameOnly) gameOnlyKey = await game.insertCSS(GAME_ONLY_CSS);
+  } catch (e) { log('game-only css failed', String(e)); }
+}
+game.addEventListener('dom-ready', () => { log('game dom-ready', game.getURL()); gameOnlyKey = null; applyGameOnly(); });
+game.addEventListener('did-navigate-in-page', () => applyGameOnly());
 game.addEventListener('did-navigate', (e) => log('game navigated', e.url));
 
 // ---------- buttons ----------
 $('btnKeys').onclick = () => { keysOn = !keysOn; $('btnKeys').textContent = 'Keys: ' + (keysOn ? 'ON' : 'OFF'); $('btnKeys').className = keysOn ? 'on' : 'off'; };
 $('btnCenter').onclick = () => { gameLane = 1; desiredLane = ctrl.lane; syncLane(); };
 $('btnFocus').onclick = focusGame;
+$('btnGameOnly').onclick = () => { gameOnly = !gameOnly; $('btnGameOnly').textContent = 'Game only: ' + (gameOnly ? 'ON' : 'OFF'); $('btnGameOnly').className = gameOnly ? 'on' : ''; applyGameOnly(); };
+$('btnFull').onclick = () => { if (document.fullscreenElement) document.exitFullscreen(); else document.documentElement.requestFullscreen(); };
 $('btnCam').onclick = () => { camVisible = !camVisible; cam.classList.toggle('hidden', !camVisible); $('btnCam').textContent = camVisible ? 'Hide cam' : 'Show cam'; };
 // ---------- manual test controls: same output layer the detector uses ----------
 const manual = {
