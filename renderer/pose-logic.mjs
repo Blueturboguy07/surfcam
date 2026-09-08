@@ -23,7 +23,9 @@ export const LM = {
 
 export const DEFAULTS = {
   mirror: true,             // selfie camera: player's left == image right
-  laneMargin: 0.05,         // hysteresis around lane boundaries, fraction of frame width
+  laneMargin: 0.03,         // hysteresis around lane boundaries, fraction of frame width
+  laneCenterHalf: 1 / 6,    // centre band = [0.5 - half, 0.5 + half]; 1/6 = equal thirds
+  laneSmoothing: 0.6,       // EMA weight of the newest frame (1 = none). 0.6 ≈ 50 ms, not visible lag
   jumpLift: 0.22,           // both ankles must rise this × torso above baseline
   jumpHipLift: 0.12,        // hips must rise this × torso too
   jumpNoAnkleHipLift: 0.24, // fallback when ankles are out of frame: hips + nose both rise
@@ -61,9 +63,21 @@ class RollingPercentile {
 function avg(a, b) { return (a + b) / 2; }
 function visible(lm, min) { return lm && (lm.visibility === undefined || lm.visibility >= min); }
 
-export function laneFromX(x, currentLane, margin) {
-  // bands: [0,1/3) -> 0, [1/3,2/3) -> 1, [2/3,1] -> 2, with hysteresis toward the current lane
-  const b1 = 1 / 3, b2 = 2 / 3;
+// Centre of the torso polygon (L/R shoulder, L/R hip), each corner weighted by its visibility so a
+// hip that is out of frame (MediaPipe still guesses a position for it) cannot drag the point around.
+export function torsoCenter(landmarks) {
+  let sx = 0, sy = 0, sw = 0;
+  for (const i of [LM.L_SHOULDER, LM.R_SHOULDER, LM.L_HIP, LM.R_HIP]) {
+    const p = landmarks[i];
+    const w = Math.max(0.05, p.visibility === undefined ? 1 : p.visibility);
+    sx += p.x * w; sy += p.y * w; sw += w;
+  }
+  return { x: sx / sw, y: sy / sw };
+}
+
+export function laneFromX(x, currentLane, margin, centerHalf = 1 / 6) {
+  // bands: [0,b1) -> 0, [b1,b2) -> 1, [b2,1] -> 2, with hysteresis toward the current lane
+  const b1 = 0.5 - centerHalf, b2 = 0.5 + centerHalf;
   if (currentLane === 0) return x > b1 + margin ? (x > b2 + margin ? 2 : 1) : 0;
   if (currentLane === 2) return x < b2 - margin ? (x < b1 - margin ? 0 : 1) : 2;
   if (x < b1 - margin) return 0;
@@ -90,9 +104,12 @@ export class PoseController {
     this.hipStand = new RollingPercentile(o.standWindowMs, o.standPercentile);
     this.noseStand = new RollingPercentile(o.standWindowMs, o.standPercentile);
     this.hipHistory = [];      // [{t, y}] for velocity
+    this.laneX = null;         // smoothed, mirrored torso-centre x
     this.armed = { jump: true, duck: true };
     this.lastFired = { jump: -Infinity, duck: -Infinity };
   }
+
+  setLaneCenterHalf(v) { this.o.laneCenterHalf = Math.min(0.3, Math.max(0.05, v)); return this.o.laneCenterHalf; }
 
   hipVelocity(t, hipY, torso) {
     const o = this.o;
@@ -130,9 +147,12 @@ export class PoseController {
     this.noseStand.push(t, nose.y);
     const hipVel = this.hipVelocity(t, hipY, torso);
 
-    // lanes
-    const xm = o.mirror ? 1 - hipX : hipX;
-    const newLane = laneFromX(xm, this.lane, o.laneMargin);
+    // lanes: centre of the torso polygon, mirrored, lightly smoothed
+    const tc = torsoCenter(landmarks);
+    const rawX = o.mirror ? 1 - tc.x : tc.x;
+    this.laneX = this.laneX === null ? rawX : o.laneSmoothing * rawX + (1 - o.laneSmoothing) * this.laneX;
+    const xm = this.laneX;
+    const newLane = laneFromX(xm, this.lane, o.laneMargin, o.laneCenterHalf);
     const laneChanged = newLane !== this.lane;
     this.lane = newLane;
 
@@ -175,7 +195,7 @@ export class PoseController {
     return {
       ready, lane: this.lane, laneChanged, events,
       thresholds: { jump: jumpThresh, duck: o.duckDrop, velocity: o.jumpVelocity, mode },
-      metrics: { tracking: true, anklesOk, torso, xm, hipLift, noseLift, liftL, liftR, feetLift, jumpSignal, hipVel, noseDrop, noseY: nose.y, hipY, armedJump: this.armed.jump, armedDuck: this.armed.duck },
+      metrics: { tracking: true, anklesOk, torso, xm, torsoCenter: tc, laneBands: [0.5 - o.laneCenterHalf, 0.5 + o.laneCenterHalf], hipLift, noseLift, liftL, liftR, feetLift, jumpSignal, hipVel, noseDrop, noseY: nose.y, hipY, armedJump: this.armed.jump, armedDuck: this.armed.duck },
     };
   }
 }

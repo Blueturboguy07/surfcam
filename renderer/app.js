@@ -39,7 +39,7 @@ async function syncLane() {
   try {
     while (keysOn && gameLane !== desiredLane) {
       if (desiredLane > gameLane) { await out.right(); gameLane++; } else { await out.left(); gameLane--; }
-      await sleep(140);
+      await sleep(100);
     }
   } finally { movingLane = false; }
 }
@@ -87,6 +87,10 @@ game.addEventListener('did-navigate', (e) => log('game navigated', e.url));
 $('btnKeys').onclick = () => { keysOn = !keysOn; $('btnKeys').textContent = 'Keys: ' + (keysOn ? 'ON' : 'OFF'); $('btnKeys').className = keysOn ? 'on' : 'off'; };
 $('btnCenter').onclick = () => { gameLane = 1; desiredLane = ctrl.lane; syncLane(); };
 $('btnFocus').onclick = focusGame;
+const setLaneWidth = (delta) => { const v = ctrl.setLaneCenterHalf(ctrl.o.laneCenterHalf + delta); $('btnLaneN').textContent = `Lanes: centre ${Math.round(v * 200)}% ▸ narrower`; try { localStorage.setItem('laneCenterHalf', v); } catch {} };
+$('btnLaneN').onclick = () => setLaneWidth(-0.02);
+$('btnLaneW').onclick = () => setLaneWidth(+0.02);
+try { const v = parseFloat(localStorage.getItem('laneCenterHalf')); if (Number.isFinite(v)) { ctrl.setLaneCenterHalf(v); setLaneWidth(0); } } catch {}
 $('btnGameOnly').onclick = () => { gameOnly = !gameOnly; $('btnGameOnly').textContent = 'Game only: ' + (gameOnly ? 'ON' : 'OFF'); $('btnGameOnly').className = gameOnly ? 'on' : ''; applyGameOnly(); };
 $('btnFull').onclick = () => { if (document.fullscreenElement) document.exitFullscreen(); else document.documentElement.requestFullscreen(); };
 $('btnCam').onclick = () => { camVisible = !camVisible; cam.classList.toggle('hidden', !camVisible); $('btnCam').textContent = camVisible ? 'Hide cam' : 'Show cam'; };
@@ -115,8 +119,10 @@ window.addEventListener('keydown', (e) => {
 
 // ---------- drawing ----------
 const BONES = [[11, 12], [11, 13], [13, 15], [12, 14], [14, 16], [11, 23], [12, 24], [23, 24], [23, 25], [25, 27], [24, 26], [26, 28]];
-function draw(landmarks, lane) {
+function draw(landmarks, lane, m) {
   const w = cam.width, h = cam.height;
+  const [b1, b2] = m?.laneBands ?? [1 / 3, 2 / 3];
+  const edges = [0, b1, b2, 1];
   ctx.save();
   ctx.translate(w, 0); ctx.scale(-1, 1);           // mirror so the player sees a mirror
   ctx.drawImage(video, 0, 0, w, h);
@@ -124,11 +130,23 @@ function draw(landmarks, lane) {
   // lane bands (already in mirrored space: left band = player's left)
   for (let i = 0; i < 3; i++) {
     ctx.fillStyle = i === lane ? 'rgba(52,211,153,.28)' : 'rgba(255,255,255,.06)';
-    ctx.fillRect((i * w) / 3, 0, w / 3, h);
+    ctx.fillRect(edges[i] * w, 0, (edges[i + 1] - edges[i]) * w, h);
   }
-  ctx.strokeStyle = 'rgba(255,255,255,.35)'; ctx.lineWidth = 1;
-  ctx.beginPath(); ctx.moveTo(w / 3, 0); ctx.lineTo(w / 3, h); ctx.moveTo((2 * w) / 3, 0); ctx.lineTo((2 * w) / 3, h); ctx.stroke();
+  ctx.strokeStyle = 'rgba(255,255,255,.45)'; ctx.lineWidth = 1;
+  ctx.beginPath(); ctx.moveTo(b1 * w, 0); ctx.lineTo(b1 * w, h); ctx.moveTo(b2 * w, 0); ctx.lineTo(b2 * w, h); ctx.stroke();
   if (!landmarks) return;
+  // torso polygon + its centre: this dot is what picks the lane
+  const Q = (i) => [(1 - landmarks[i].x) * w, landmarks[i].y * h];
+  ctx.fillStyle = 'rgba(96,165,250,.25)'; ctx.strokeStyle = '#60a5fa'; ctx.lineWidth = 2;
+  ctx.beginPath();
+  for (const [k, i] of [LM.L_SHOULDER, LM.R_SHOULDER, LM.R_HIP, LM.L_HIP].entries()) { const [x, y] = Q(i); k ? ctx.lineTo(x, y) : ctx.moveTo(x, y); }
+  ctx.closePath(); ctx.fill(); ctx.stroke();
+  if (m?.torsoCenter) {
+    const cx = (1 - m.torsoCenter.x) * w, cy = m.torsoCenter.y * h;
+    ctx.fillStyle = '#fbbf24'; ctx.beginPath(); ctx.arc(cx, cy, 7, 0, 7); ctx.fill();
+    ctx.strokeStyle = '#000'; ctx.lineWidth = 2; ctx.stroke();
+    ctx.strokeStyle = 'rgba(251,191,36,.8)'; ctx.lineWidth = 1; ctx.beginPath(); ctx.moveTo(cx, 0); ctx.lineTo(cx, h); ctx.stroke();
+  }
   const P = (i) => [(1 - landmarks[i].x) * w, landmarks[i].y * h];
   ctx.strokeStyle = '#34d399'; ctx.lineWidth = 2;
   for (const [a, b] of BONES) { const [ax, ay] = P(a), [bx, by] = P(b); ctx.beginPath(); ctx.moveTo(ax, ay); ctx.lineTo(bx, by); ctx.stroke(); }
@@ -141,7 +159,7 @@ function setStatus(m, res) {
   laneSpans.forEach((s, i) => s.classList.toggle('active', i === (res?.lane ?? 1)));
   statusEl.textContent = [
     `${modelReady ? 'model ok' : 'loading model…'}  ${fps} fps  ${tracking ? 'TRACKING' : 'no person'}${res?.ready ? '' : tracking ? ' (calibrating)' : ''}`,
-    `lane ${['L', 'C', 'R'][res?.lane ?? 1]}  game ${['L', 'C', 'R'][gameLane]}  keys ${keysOn ? 'ON' : 'OFF'}  sent ${out.sent}${out.last ? ' ' + out.last : ''}`,
+    `lane ${['L', 'C', 'R'][res?.lane ?? 1]}  dot ${f(m?.xm)}  game ${['L', 'C', 'R'][gameLane]}  keys ${keysOn ? 'ON' : 'OFF'}  sent ${out.sent}${out.last ? ' ' + out.last : ''}`,
     `mode: ${lastThresholds?.mode ?? '—'}   pose lost ${lostCount}x`,
     `JUMP signal ${f(m?.jumpSignal)} / need ${f(lastThresholds?.jump)}   rise ${f(m?.hipVel, 1)} / need ${f(lastThresholds?.velocity, 1)}${m?.armedJump === false ? ' (re-arming)' : ''}`,
     `DUCK signal ${f(m?.noseDrop)} / need ${f(lastThresholds?.duck)}${m?.armedDuck === false ? ' (re-arming)' : ''}`,
@@ -189,7 +207,7 @@ async function main() {
         if (res.lane !== desiredLane) { desiredLane = res.lane; syncLane(); }
         for (const ev of res.events) onEvent(ev, m);
       }
-      if (camVisible) draw(lm, res.lane);
+      if (camVisible) draw(lm, res.lane, m);
       frames++;
       if (now - fpsT > 1000) { fps = Math.round((frames * 1000) / (now - fpsT)); frames = 0; fpsT = now; }
       setStatus(m, res);

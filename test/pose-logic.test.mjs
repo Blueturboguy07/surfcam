@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { PoseController, laneFromX } from '../renderer/pose-logic.mjs';
+import { PoseController, laneFromX, torsoCenter } from '../renderer/pose-logic.mjs';
 
 // Synthetic body in normalized image coords (y down). torso = hip - shoulder.
 function body({ x = 0.5, shoulderY = 0.35, torso = 0.25, ankleLift = [0, 0], hipLift = 0, noseLift = 0, anklesVisible = true } = {}) {
@@ -175,6 +175,41 @@ test('lanes: jitter on a boundary never flaps', () => {
   const res = run(c, frames);
   const changes = res.filter((r) => r.laneChanged).length;
   assert.ok(changes <= 1, `lane flapped ${changes} times`);
+});
+
+test('torso centre is the mean of the four corners when all are visible', () => {
+  const lm = body({ x: 0.4 });
+  const c = torsoCenter(lm);
+  assert.ok(Math.abs(c.x - 0.4) < 1e-9);
+});
+
+test('an invisible hip that MediaPipe guessed far away barely moves the lane point', () => {
+  const lm = body({ x: 0.5 });
+  lm[23] = { x: 0.95, y: lm[23].y, z: 0, visibility: 0.05 };   // left hip out of frame, guessed at the edge
+  lm[24] = { x: 0.95, y: lm[24].y, z: 0, visibility: 0.05 };
+  const c = torsoCenter(lm);
+  assert.ok(Math.abs(c.x - 0.5) < 0.05, 'centre drifted to ' + c.x);
+  const ctrl = new PoseController();
+  const res = run(ctrl, Array.from({ length: 60 }, () => lm));
+  assert.equal(res[res.length - 1].lane, 1);
+});
+
+test('lane changes on the frame the centre crosses the band edge (no lag beyond smoothing)', () => {
+  const ctrl = new PoseController();
+  const frames = [...standing(1500, { x: 0.5 })];
+  for (let i = 0; i < 10; i++) frames.push(body({ x: 0.5 + 0.35 }));  // step to player-left (mirror) in one frame
+  const res = run(ctrl, frames);
+  const first = res.findIndex((r) => r.lane === 0);
+  const stepAt = Math.round(1500 / DT);
+  assert.ok(first >= stepAt && first - stepAt <= 2, `lane changed ${first - stepAt} frames after the step`);
+});
+
+test('narrower centre band makes lanes easier to reach', () => {
+  const wide = new PoseController();
+  const narrow = new PoseController({ laneCenterHalf: 0.08 });
+  const frames = [...standing(1500, { x: 0.5 }), ...standing(300, { x: 0.5 - 0.12 })]; // small step to player-right
+  assert.equal(run(wide, frames).pop().lane, 1);
+  assert.equal(run(narrow, frames).pop().lane, 2);
 });
 
 test('laneFromX hysteresis table', () => {
