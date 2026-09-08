@@ -212,6 +212,18 @@ test('narrower centre band makes lanes easier to reach', () => {
   assert.equal(run(narrow, frames).pop().lane, 2);
 });
 
+test('half-size thresholds: a small hop and a shallow crouch register, jogging still does not', () => {
+  const c = new PoseController();   // default actionScale 0.5
+  const res = run(c, [...standing(1500), ...jogging(6000), ...jump(260, { height: 0.2 }), ...jogging(2000), ...duck(600, { depth: 0.3 }), ...jogging(3000)]);
+  assert.deepEqual(events(res), ['jump', 'duck']);
+});
+
+test('full-size thresholds (actionScale 1) reject the same small hop and shallow crouch', () => {
+  const c = new PoseController({ actionScale: 1 });
+  const res = run(c, [...standing(1500), ...jump(260, { height: 0.2 }), ...standing(1000), ...duck(600, { depth: 0.3 }), ...standing(500)]);
+  assert.deepEqual(events(res), []);
+});
+
 test('laneFromX hysteresis table', () => {
   assert.equal(laneFromX(0.30, 1, 0.05), 1);
   assert.equal(laneFromX(0.27, 1, 0.05), 0);

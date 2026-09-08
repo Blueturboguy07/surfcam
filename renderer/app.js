@@ -91,6 +91,11 @@ const setLaneWidth = (delta) => { const v = ctrl.setLaneCenterHalf(ctrl.o.laneCe
 $('btnLaneN').onclick = () => setLaneWidth(-0.02);
 $('btnLaneW').onclick = () => setLaneWidth(+0.02);
 try { const v = parseFloat(localStorage.getItem('laneCenterHalf')); if (Number.isFinite(v)) { ctrl.setLaneCenterHalf(v); setLaneWidth(0); } } catch {}
+const setSens = (delta) => { const v = ctrl.setActionScale(ctrl.o.actionScale + delta); $('btnSensUp').textContent = `Jump/duck need ${Math.round(v * 100)}% ▸ less`; try { localStorage.setItem('actionScale', v); } catch {} };
+$('btnSensUp').onclick = () => setSens(-0.1);
+$('btnSensDown').onclick = () => setSens(+0.1);
+try { const v = parseFloat(localStorage.getItem('actionScale')); if (Number.isFinite(v)) ctrl.setActionScale(v); } catch {}
+setSens(0);
 $('btnGameOnly').onclick = () => { gameOnly = !gameOnly; $('btnGameOnly').textContent = 'Game only: ' + (gameOnly ? 'ON' : 'OFF'); $('btnGameOnly').className = gameOnly ? 'on' : ''; applyGameOnly(); };
 $('btnFull').onclick = () => { if (document.fullscreenElement) document.exitFullscreen(); else document.documentElement.requestFullscreen(); };
 $('btnCam').onclick = () => { camVisible = !camVisible; cam.classList.toggle('hidden', !camVisible); $('btnCam').textContent = camVisible ? 'Hide cam' : 'Show cam'; };
