@@ -1,0 +1,15 @@
+{
+  "name": "surfcam",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Webcam pose controller + HUD wrapped around Subway Surfers (Poki web build)",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "test": "node --test test/*.test.mjs"
+  },
+  "dependencies": {
+    "@mediapipe/tasks-vision": "^1.0.1",
+    "electron": "^44.2.0"
+  }
+}

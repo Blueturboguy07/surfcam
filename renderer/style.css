@@ -1,0 +1,18 @@
+html, body { margin: 0; height: 100%; background: #000; overflow: hidden; font: 12px/1.35 ui-monospace, Menlo, monospace; color: #eee; }
+#game { position: absolute; inset: 0; width: 100%; height: 100%; }
+#video { position: absolute; width: 1px; height: 1px; opacity: 0; pointer-events: none; }
+#hud { position: absolute; top: 12px; left: 12px; width: 320px; display: flex; flex-direction: column; gap: 6px; pointer-events: none; z-index: 10; }
+#hud > * { pointer-events: auto; }
+#cam { width: 320px; height: 240px; border-radius: 8px; background: #111; box-shadow: 0 4px 24px rgba(0,0,0,.6); }
+#cam.hidden { display: none; }
+#lane-strip { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 4px; }
+#lane-strip span { text-align: center; padding: 6px 0; border-radius: 6px; background: rgba(255,255,255,.12); font-weight: 700; }
+#lane-strip span.active { background: #34d399; color: #000; }
+#flash { height: 28px; border-radius: 6px; text-align: center; line-height: 28px; font-weight: 800; letter-spacing: .1em; opacity: 0; transition: opacity .15s; }
+#flash.jump { background: #60a5fa; color: #000; opacity: 1; }
+#flash.duck { background: #f59e0b; color: #000; opacity: 1; }
+#status { margin: 0; padding: 8px 10px; border-radius: 8px; background: rgba(0,0,0,.72); white-space: pre-wrap; }
+#buttons { display: flex; flex-wrap: wrap; gap: 4px; }
+#buttons button { flex: 1 1 45%; padding: 6px 4px; border: 0; border-radius: 6px; background: rgba(255,255,255,.2); color: #fff; font: inherit; cursor: pointer; }
+#buttons button.on { background: #34d399; color: #000; font-weight: 700; }
+#buttons button.off { background: #ef4444; color: #fff; font-weight: 700; }

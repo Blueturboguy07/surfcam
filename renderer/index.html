@@ -1,0 +1,31 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>SurfCam</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <webview id="game"
+    src="https://poki.com/en/g/subway-surfers"
+    partition="persist:poki"
+    allowfullscreen
+    useragent="Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36"></webview>
+
+  <div id="hud">
+    <canvas id="cam" width="320" height="240"></canvas>
+    <div id="lane-strip"><span>L</span><span>C</span><span>R</span></div>
+    <div id="flash"></div>
+    <pre id="status">starting camera…</pre>
+    <div id="buttons">
+      <button id="btnKeys" class="on">Keys: ON</button>
+      <button id="btnCenter">Recenter lane</button>
+      <button id="btnFocus">Focus game</button>
+      <button id="btnCam">Hide cam</button>
+    </div>
+  </div>
+
+  <video id="video" autoplay playsinline muted></video>
+  <script type="module" src="app.js"></script>
+</body>
+</html>
