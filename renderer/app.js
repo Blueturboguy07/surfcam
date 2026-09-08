@@ -31,6 +31,7 @@ let keysOn = true, camVisible = true;
 let gameLane = 1, desiredLane = 1, movingLane = false;
 let fps = 0, frames = 0, fpsT = performance.now();
 let lastEvent = '', lastEventT = 0, tracking = false, modelReady = false;
+let lostCount = 0, wasTracking = false, traceRows = [], lastTraceT = 0, lastThresholds = null;
 
 async function syncLane() {
   if (movingLane) return;
@@ -42,8 +43,9 @@ async function syncLane() {
     }
   } finally { movingLane = false; }
 }
-function onEvent(ev) {
+function onEvent(ev, m) {
   lastEvent = ev; lastEventT = performance.now();
+  log('EVENT', ev, JSON.stringify({ hipLift: m?.hipLift, noseLift: m?.noseLift, feetLift: m?.feetLift, jumpSignal: m?.jumpSignal, noseDrop: m?.noseDrop, torso: m?.torso, anklesOk: m?.anklesOk }));
   flashEl.textContent = ev.toUpperCase(); flashEl.className = ev;
   setTimeout(() => { if (performance.now() - lastEventT > 350) flashEl.className = ''; }, 400);
   if (!keysOn) return;
@@ -69,10 +71,27 @@ $('btnKeys').onclick = () => { keysOn = !keysOn; $('btnKeys').textContent = 'Key
 $('btnCenter').onclick = () => { gameLane = 1; desiredLane = ctrl.lane; syncLane(); };
 $('btnFocus').onclick = focusGame;
 $('btnCam').onclick = () => { camVisible = !camVisible; cam.classList.toggle('hidden', !camVisible); $('btnCam').textContent = camVisible ? 'Hide cam' : 'Show cam'; };
+// ---------- manual test controls: same output layer the detector uses ----------
+const manual = {
+  left: () => { out.left(); gameLane = Math.max(0, gameLane - 1); flash('◀ LEFT'); },
+  right: () => { out.right(); gameLane = Math.min(2, gameLane + 1); flash('RIGHT ▶'); },
+  jump: () => { out.jump(); flash('▲ JUMP (manual)'); },
+  duck: () => { out.duck(); flash('▼ DUCK (manual)'); },
+  start: () => { out.tap('Space'); flash('SPACE (start / hoverboard)'); },
+};
+function flash(text, cls = 'manual') {
+  flashEl.textContent = text; flashEl.className = cls;
+  const at = performance.now(); lastEventT = at;
+  setTimeout(() => { if (performance.now() - lastEventT > 350) flashEl.className = ''; }, 400);
+}
+$('btnStart').onclick = manual.start; $('btnLeft').onclick = manual.left; $('btnRight').onclick = manual.right; $('btnUp').onclick = manual.jump; $('btnDown').onclick = manual.duck;
 window.addEventListener('keydown', (e) => {
   if (e.key === 'k') $('btnKeys').click();
   if (e.key === 'c') $('btnCenter').click();
   if (e.key === 'f') focusGame();
+  if (e.key === ' ') { e.preventDefault(); manual.start(); }
+  const map = { ArrowLeft: manual.left, ArrowRight: manual.right, ArrowUp: manual.jump, ArrowDown: manual.duck, a: manual.left, d: manual.right, w: manual.jump, s: manual.duck };
+  if (map[e.key]) { e.preventDefault(); map[e.key](); }
 });
 
 // ---------- drawing ----------
@@ -104,8 +123,12 @@ function setStatus(m, res) {
   statusEl.textContent = [
     `${modelReady ? 'model ok' : 'loading model…'}  ${fps} fps  ${tracking ? 'TRACKING' : 'no person'}${res?.ready ? '' : tracking ? ' (calibrating)' : ''}`,
     `lane ${['L', 'C', 'R'][res?.lane ?? 1]}  game ${['L', 'C', 'R'][gameLane]}  keys ${keysOn ? 'ON' : 'OFF'}  sent ${out.sent}${out.last ? ' ' + out.last : ''}`,
-    `feet ${f(m?.feetLift)}  hips ${f(m?.hipLift)}  nose ${f(m?.noseLift)}  torso ${f(m?.torso, 3)}${m && m.anklesOk === false ? '  ankles hidden' : ''}`,
+    `mode: ${lastThresholds?.mode ?? '—'}   pose lost ${lostCount}x`,
+    `JUMP signal ${f(m?.jumpSignal)} / need ${f(lastThresholds?.jump)}   rise ${f(m?.hipVel, 1)} / need ${f(lastThresholds?.velocity, 1)}${m?.armedJump === false ? ' (re-arming)' : ''}`,
+    `DUCK signal ${f(m?.noseDrop)} / need ${f(lastThresholds?.duck)}${m?.armedDuck === false ? ' (re-arming)' : ''}`,
+    `feet ${f(m?.feetLift)}  hips ${f(m?.hipLift)}  nose ${f(m?.noseLift)}  torso ${f(m?.torso, 3)}`,
     `last: ${lastEvent || '—'}   [k] keys  [c] recenter  [f] focus game`,
+    `manual test: arrows / WASD (click the HUD first) or the ◀ ▲ ▼ ▶ buttons`,
   ].join('\n');
 }
 
@@ -133,11 +156,19 @@ async function main() {
       const r = landmarker.detectForVideo(video, now);
       const lm = r.landmarks?.[0];
       tracking = !!lm;
+      if (wasTracking && !tracking) { lostCount++; log('POSE LOST at', Math.round(now)); }
+      if (!wasTracking && tracking) log('pose found at', Math.round(now));
+      wasTracking = tracking;
       res = ctrl.update(lm, now);
       m = res.metrics;
+      if (res.thresholds) lastThresholds = res.thresholds;
+      traceRows.push({ t: Math.round(now), tracking, ready: res.ready, lane: res.lane, ev: res.events.join(','), mode: res.thresholds?.mode,
+        hip: m?.hipLift, nose: m?.noseLift, feet: m?.feetLift, jumpSig: m?.jumpSignal, jumpThr: res.thresholds?.jump, hipVel: m?.hipVel, noseDrop: m?.noseDrop, duckThr: res.thresholds?.duck,
+        torso: m?.torso, noseY: m?.noseY, hipY: m?.hipY, armedJ: m?.armedJump, armedD: m?.armedDuck });
+      if (now - lastTraceT > 1000) { lastTraceT = now; window.surf?.trace(traceRows); traceRows = []; }
       if (res.ready) {
         if (res.lane !== desiredLane) { desiredLane = res.lane; syncLane(); }
-        for (const ev of res.events) onEvent(ev);
+        for (const ev of res.events) onEvent(ev, m);
       }
       if (camVisible) draw(lm, res.lane);
       frames++;

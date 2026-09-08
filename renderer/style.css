@@ -16,3 +16,8 @@ html, body { margin: 0; height: 100%; background: #000; overflow: hidden; font: 
 #buttons button { flex: 1 1 45%; padding: 6px 4px; border: 0; border-radius: 6px; background: rgba(255,255,255,.2); color: #fff; font: inherit; cursor: pointer; }
 #buttons button.on { background: #34d399; color: #000; font-weight: 700; }
 #buttons button.off { background: #ef4444; color: #fff; font-weight: 700; }
+#manual { display: grid; grid-template-columns: repeat(4, 1fr); gap: 4px; }
+#manual #btnStart { grid-column: 1 / -1; font-size: 12px; padding: 6px 0; }
+#manual button { padding: 8px 0; border: 0; border-radius: 6px; background: rgba(255,255,255,.22); color: #fff; font: 700 16px/1 ui-monospace, monospace; cursor: pointer; }
+#manual button:active { background: #60a5fa; color: #000; }
+#flash.manual { background: #a78bfa; color: #000; opacity: 1; }

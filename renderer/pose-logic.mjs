@@ -1,15 +1,20 @@
 // Pure pose-to-game-intent logic. No DOM, no MediaPipe imports, so it runs in node tests.
 // Input: MediaPipe Pose 33 normalized landmarks ({x,y,z,visibility}, y grows DOWN), timestamp ms.
-// Output per frame: { ready, lane, events:['jump'|'duck'], metrics }.
+// Output per frame: { ready, lane, events:['jump'|'duck'], thresholds, metrics }.
 //
 // Design rules (the reason this survives jogging in place):
 //  * every vertical measure is divided by a torso-length baseline, never pixels
-//  * jump  = BOTH ankles above their rolling-median baseline at once AND hips lifted.
-//            jogging alternates feet, so min(liftL, liftR) stays ~0.
-//  * duck  = nose drops well below its rolling baseline. jogging bounces the nose a little,
-//            a crouch drops it a lot. does not depend on ankles being in frame.
-//  * lanes = mirrored hip-center x in three bands with hysteresis, so standing on a
-//            boundary never flaps.
+//  * jump  = BOTH ankles above their rolling-median baseline at once AND hips lifted AND the hips
+//            are moving up fast. jogging alternates feet, so min(liftL, liftR) stays ~0, and
+//            standing up from a crouch is too slow to pass the velocity gate.
+//  * duck  = nose drops well below its "standing level" baseline. jogging bounces the nose a
+//            little, a crouch drops it a lot. does not depend on ankles being in frame.
+//  * lanes = mirrored hip-center x in three bands with hysteresis, so standing on a boundary
+//            never flaps.
+//  * baselines NEVER freeze. standing level for hips/nose is a rolling 25th percentile of y
+//            (i.e. the upper envelope of the body), so a held crouch does not drag it down for
+//            several seconds and a brief jump cannot drag it up. actions re-arm by hysteresis
+//            or by timeout, so nothing can stay stuck.
 
 export const LM = {
   NOSE: 0, L_SHOULDER: 11, R_SHOULDER: 12, L_HIP: 23, R_HIP: 24,
@@ -17,23 +22,27 @@ export const LM = {
 };
 
 export const DEFAULTS = {
-  mirror: true,            // selfie camera: player's left == image right
-  laneMargin: 0.05,        // hysteresis around lane boundaries, fraction of frame width
-  jumpLift: 0.22,          // both ankles must rise this × torso above baseline
-  jumpHipLift: 0.12,       // hips must rise this × torso too
-  jumpNoAnkleHipLift: 0.24,// fallback when ankles are out of frame: hips + nose both rise
-  rearmFrac: 0.4,          // signal must fall below this fraction of threshold to re-arm
-  duckDrop: 0.45,          // nose must drop this × torso below its baseline
-  baselineWindowMs: 1500,  // rolling window for ankle / hip baselines
-  noseWindowMs: 4000,      // rolling window for the nose baseline
+  mirror: true,             // selfie camera: player's left == image right
+  laneMargin: 0.05,         // hysteresis around lane boundaries, fraction of frame width
+  jumpLift: 0.22,           // both ankles must rise this × torso above baseline
+  jumpHipLift: 0.12,        // hips must rise this × torso too
+  jumpNoAnkleHipLift: 0.24, // fallback when ankles are out of frame: hips + nose both rise
+  jumpVelocity: 1.6,        // hips must be rising faster than this, in torso lengths per second
+  velocityWindowMs: 120,
+  rearmFrac: 0.4,           // signal must fall below this fraction of threshold to re-arm
+  duckDrop: 0.45,           // nose must drop this × torso below standing level
+  maxActionMs: { jump: 1500, duck: 4000 }, // safety net only: re-arm by timeout no matter what
+  ankleWindowMs: 1500,      // rolling median window for ankle ground level
+  standWindowMs: 5000,      // rolling window for hip / nose standing level
+  standPercentile: 0.25,    // percentile of y (y is down) that counts as standing level
   torsoWindowMs: 2000,
   cooldownMs: { jump: 600, duck: 700 },
-  warmupMs: 1000,          // no events until baselines have this much history
+  warmupMs: 1000,           // no events until baselines have this much history
   minVisibility: 0.5,
 };
 
-class RollingMedian {
-  constructor(windowMs) { this.windowMs = windowMs; this.samples = []; }
+class RollingPercentile {
+  constructor(windowMs, q = 0.5) { this.windowMs = windowMs; this.q = q; this.samples = []; }
   push(t, v) {
     this.samples.push({ t, v });
     const cutoff = t - this.windowMs;
@@ -43,8 +52,9 @@ class RollingMedian {
   value() {
     if (!this.samples.length) return NaN;
     const s = this.samples.map((x) => x.v).sort((a, b) => a - b);
-    const m = s.length >> 1;
-    return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2;
+    const pos = (s.length - 1) * this.q;
+    const lo = Math.floor(pos), hi = Math.ceil(pos);
+    return lo === hi ? s[lo] : s[lo] + (s[hi] - s[lo]) * (pos - lo);
   }
 }
 
@@ -63,29 +73,42 @@ export function laneFromX(x, currentLane, margin) {
 
 export class PoseController {
   constructor(opts = {}) {
-    this.o = { ...DEFAULTS, ...opts, cooldownMs: { ...DEFAULTS.cooldownMs, ...(opts.cooldownMs || {}) } };
+    this.o = {
+      ...DEFAULTS, ...opts,
+      cooldownMs: { ...DEFAULTS.cooldownMs, ...(opts.cooldownMs || {}) },
+      maxActionMs: { ...DEFAULTS.maxActionMs, ...(opts.maxActionMs || {}) },
+    };
     this.reset();
   }
   reset() {
     const o = this.o;
     this.lane = 1;
     this.firstT = null;
-    this.torsoBase = new RollingMedian(o.torsoWindowMs);
-    this.ankleLBase = new RollingMedian(o.baselineWindowMs);
-    this.ankleRBase = new RollingMedian(o.baselineWindowMs);
-    this.hipBase = new RollingMedian(o.baselineWindowMs);
-    this.noseBase = new RollingMedian(o.noseWindowMs);
+    this.torsoBase = new RollingPercentile(o.torsoWindowMs, 0.5);
+    this.ankleLBase = new RollingPercentile(o.ankleWindowMs, 0.5);
+    this.ankleRBase = new RollingPercentile(o.ankleWindowMs, 0.5);
+    this.hipStand = new RollingPercentile(o.standWindowMs, o.standPercentile);
+    this.noseStand = new RollingPercentile(o.standWindowMs, o.standPercentile);
+    this.hipHistory = [];      // [{t, y}] for velocity
     this.armed = { jump: true, duck: true };
     this.lastFired = { jump: -Infinity, duck: -Infinity };
-    this.airborne = false;
-    this.ducking = false;
+  }
+
+  hipVelocity(t, hipY, torso) {
+    const o = this.o;
+    this.hipHistory.push({ t, y: hipY });
+    while (this.hipHistory.length > 2 && this.hipHistory[1].t <= t - o.velocityWindowMs) this.hipHistory.shift();
+    const old = this.hipHistory[0];
+    const dt = (t - old.t) / 1000;
+    if (dt <= 0) return 0;
+    return (old.y - hipY) / torso / dt; // positive = moving up
   }
 
   update(landmarks, t) {
     const o = this.o;
     const events = [];
     if (!landmarks || landmarks.length < 33) {
-      return { ready: false, lane: this.lane, events, metrics: { tracking: false } };
+      return { ready: false, lane: this.lane, laneChanged: false, events, metrics: { tracking: false } };
     }
     if (this.firstT === null) this.firstT = t;
     const ls = landmarks[LM.L_SHOULDER], rs = landmarks[LM.R_SHOULDER];
@@ -98,17 +121,14 @@ export class PoseController {
     const hipX = avg(lh.x, rh.x);
     const torsoNow = Math.max(1e-3, hipY - shoulderY);
 
-    // baselines. frozen while an action is in progress so the action does not pollute them.
-    const inAction = this.airborne || this.ducking;
-    if (!inAction) this.torsoBase.push(t, torsoNow);
+    this.torsoBase.push(t, torsoNow);
     const torso = this.torsoBase.value() || torsoNow;
 
     const anklesOk = visible(la, o.minVisibility) && visible(ra, o.minVisibility);
-    if (!inAction) {
-      if (anklesOk) { this.ankleLBase.push(t, la.y); this.ankleRBase.push(t, ra.y); }
-      this.hipBase.push(t, hipY);
-      this.noseBase.push(t, nose.y);
-    }
+    if (anklesOk) { this.ankleLBase.push(t, la.y); this.ankleRBase.push(t, ra.y); }
+    this.hipStand.push(t, hipY);
+    this.noseStand.push(t, nose.y);
+    const hipVel = this.hipVelocity(t, hipY, torso);
 
     // lanes
     const xm = o.mirror ? 1 - hipX : hipX;
@@ -117,39 +137,45 @@ export class PoseController {
     this.lane = newLane;
 
     // vertical signals in torso units (positive = moved UP on screen)
-    const hipLift = (this.hipBase.value() - hipY) / torso;
-    const noseLift = (this.noseBase.value() - nose.y) / torso;
+    const hipLift = (this.hipStand.value() - hipY) / torso;
+    const noseLift = (this.noseStand.value() - nose.y) / torso;
     const liftL = anklesOk ? (this.ankleLBase.value() - la.y) / torso : NaN;
     const liftR = anklesOk ? (this.ankleRBase.value() - ra.y) / torso : NaN;
     const feetLift = anklesOk ? Math.min(liftL, liftR) : NaN;
 
-    const ready = (t - this.firstT) >= o.warmupMs && this.hipBase.spanMs >= o.warmupMs * 0.8;
+    const ready = (t - this.firstT) >= o.warmupMs && this.hipStand.spanMs >= o.warmupMs * 0.8;
+
+    // timeouts: nothing can stay stuck
+    if (!this.armed.jump && t - this.lastFired.jump > o.maxActionMs.jump) this.armed.jump = true;
+    if (!this.armed.duck && t - this.lastFired.duck > o.maxActionMs.duck) this.armed.duck = true;
 
     // jump
-    let jumpSignal, jumpThresh;
-    if (anklesOk) { jumpSignal = Math.min(feetLift, hipLift / (o.jumpHipLift / o.jumpLift)); jumpThresh = o.jumpLift; }
-    else { jumpSignal = Math.min(hipLift, noseLift); jumpThresh = o.jumpNoAnkleHipLift; }
+    let jumpSignal, jumpThresh, mode;
+    if (anklesOk) { jumpSignal = Math.min(feetLift, hipLift * (o.jumpLift / o.jumpHipLift)); jumpThresh = o.jumpLift; mode = 'feet+hips'; }
+    else { jumpSignal = Math.min(hipLift, noseLift); jumpThresh = o.jumpNoAnkleHipLift; mode = 'hips+nose (ankles hidden)'; }
+    const fastEnough = hipVel > o.jumpVelocity;
     if (this.armed.jump) {
-      if (ready && jumpSignal > jumpThresh && t - this.lastFired.jump > o.cooldownMs.jump) {
-        events.push('jump'); this.lastFired.jump = t; this.armed.jump = false; this.airborne = true;
+      if (ready && jumpSignal > jumpThresh && fastEnough && t - this.lastFired.jump > o.cooldownMs.jump) {
+        events.push('jump'); this.lastFired.jump = t; this.armed.jump = false;
       }
     } else if (jumpSignal < jumpThresh * o.rearmFrac) {
-      this.armed.jump = true; this.airborne = false;
+      this.armed.jump = true;
     }
 
     // duck
     const noseDrop = -noseLift;
     if (this.armed.duck) {
       if (ready && noseDrop > o.duckDrop && t - this.lastFired.duck > o.cooldownMs.duck) {
-        events.push('duck'); this.lastFired.duck = t; this.armed.duck = false; this.ducking = true;
+        events.push('duck'); this.lastFired.duck = t; this.armed.duck = false;
       }
     } else if (noseDrop < o.duckDrop * o.rearmFrac) {
-      this.armed.duck = true; this.ducking = false;
+      this.armed.duck = true;
     }
 
     return {
       ready, lane: this.lane, laneChanged, events,
-      metrics: { tracking: true, anklesOk, torso, xm, hipLift, noseLift, liftL, liftR, feetLift, jumpSignal, noseDrop },
+      thresholds: { jump: jumpThresh, duck: o.duckDrop, velocity: o.jumpVelocity, mode },
+      metrics: { tracking: true, anklesOk, torso, xm, hipLift, noseLift, liftL, liftR, feetLift, jumpSignal, hipVel, noseDrop, noseY: nose.y, hipY, armedJump: this.armed.jump, armedDuck: this.armed.duck },
     };
   }
 }

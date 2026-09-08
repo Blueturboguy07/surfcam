@@ -120,6 +120,43 @@ test('ankles out of frame: jump still detected from hips+nose, jogging still ign
   assert.deepEqual(events(res), ['jump']);
 });
 
+// hold a crouch (nose and hips down) for `ms`, entered over 400 ms and left over `riseMs`
+function crouchHold(ms, { depth = 0.9, hipDepth = 0.6, riseMs = 600, torso = 0.25 } = {}) {
+  const enter = Math.round(400 / DT), hold = Math.round(ms / DT), rise = Math.round(riseMs / DT);
+  const frames = [];
+  for (let i = 0; i < enter; i++) { const a = Math.sin((i / (enter - 1)) * Math.PI / 2); frames.push(body({ torso, noseLift: -a * depth, hipLift: -a * hipDepth })); }
+  for (let i = 0; i < hold; i++) frames.push(body({ torso, noseLift: -depth, hipLift: -hipDepth }));
+  for (let i = 0; i < rise; i++) { const a = Math.cos((i / (rise - 1)) * Math.PI / 2); frames.push(body({ torso, noseLift: -a * depth, hipLift: -a * hipDepth })); }
+  return frames;
+}
+
+test('standing up from a held crouch is NOT a jump, and the crouch is exactly one duck', () => {
+  const c = new PoseController();
+  const res = run(c, [...standing(1500), ...crouchHold(2000), ...standing(1500)]);
+  assert.deepEqual(events(res), ['duck']);
+});
+
+test('standing up quickly from a short crouch is still not a jump', () => {
+  const c = new PoseController();
+  const res = run(c, [...standing(1500), ...crouchHold(300, { riseMs: 350 }), ...standing(1500)]);
+  assert.deepEqual(events(res), ['duck']);
+});
+
+test('duck re-arms: two crouches fire two ducks, and a jump after them still fires', () => {
+  const c = new PoseController();
+  const res = run(c, [...standing(1500), ...crouchHold(800), ...standing(1200), ...crouchHold(800), ...standing(1200), ...jump(450), ...standing(600)]);
+  assert.deepEqual(events(res), ['duck', 'duck', 'jump']);
+});
+
+test('nothing stays stuck: a very long crouch re-arms and a later jump fires', () => {
+  const c = new PoseController();
+  const res = run(c, [...standing(1500), ...crouchHold(6000), ...standing(2500), ...jump(450), ...standing(600)]);
+  const ev = events(res);
+  assert.equal(ev[0], 'duck');
+  assert.equal(ev[ev.length - 1], 'jump');
+  assert.ok(!ev.includes('jump') || ev.indexOf('jump') === ev.length - 1, 'a jump fired while standing up: ' + ev);
+});
+
 test('lanes: mirrored, stepping to the player left goes to lane 0, with hysteresis', () => {
   const c = new PoseController();
   // player steps to THEIR left = image x increases (mirror)
