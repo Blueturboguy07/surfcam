@@ -4,9 +4,10 @@
 //
 // Design rules (the reason this survives jogging in place):
 //  * every vertical measure is divided by a torso-length baseline, never pixels
-//  * jump  = BOTH ankles above their rolling ground level (75th percentile of y) at once AND hips lifted AND the hips
-//            are moving up fast. jogging alternates feet, so min(liftL, liftR) stays ~0, and
-//            standing up from a crouch is too slow to pass the velocity gate.
+//  * jump  = BOTH ankles above their rolling ground level (75th percentile of y) at once, hips not
+//            descending, and hips rising fast. jogging alternates feet, so min(liftL, liftR) stays ~0;
+//            standing up from a crouch keeps the feet on the ground. without ankles: hips AND nose
+//            above their standing level plus the velocity gate.
 //  * duck  = nose drops well below its "standing level" baseline. jogging bounces the nose a
 //            little, a crouch drops it a lot. does not depend on ankles being in frame.
 //  * lanes = mirrored hip-center x in three bands with hysteresis, so standing on a boundary
@@ -29,10 +30,12 @@ export const DEFAULTS = {
   jumpLift: 0.22,           // both ankles must rise this × torso above baseline
   jumpHipLift: 0.12,        // hips must rise this × torso too
   jumpNoAnkleHipLift: 0.24, // fallback when ankles are out of frame: hips + nose both rise
-  jumpVelocity: 1.4,        // hips must be rising faster than this, in torso lengths per second
-  actionScale: 0.5,         // multiplies every jump/duck distance threshold (0.5 = half the movement)
+  jumpVelocity: 1.2,        // hips must be rising faster than this, in torso lengths per second
+  jumpHipFloor: -0.05,      // feet mode: hips only have to be NOT descending (a leg tuck while sitting is not a jump)
+  jumpScale: 0.25,          // multiplies the jump distance thresholds (0.25 = a quarter of the original movement)
+  duckScale: 0.5,           // multiplies the duck distance threshold
   duckHoldMs: 150,          // a shallow duck (between scaled and full threshold) must be held this long; a deep one is instant
-  velocityWindowMs: 120,
+  velocityWindowMs: 66,     // two frames at 30 fps: long enough to beat landmark noise, short enough to see a 200 ms hop
   rearmFrac: 0.4,           // signal must fall below this fraction of threshold to re-arm
   duckDrop: 0.45,           // nose must drop this × torso below standing level
   maxActionMs: { jump: 1500, duck: 4000 }, // safety net only: re-arm by timeout no matter what
@@ -113,7 +116,8 @@ export class PoseController {
     this.lastFired = { jump: -Infinity, duck: -Infinity };
   }
 
-  setActionScale(v) { this.o.actionScale = Math.min(1.5, Math.max(0.2, v)); return this.o.actionScale; }
+  setJumpScale(v) { this.o.jumpScale = Math.min(1.5, Math.max(0.1, v)); return this.o.jumpScale; }
+  setDuckScale(v) { this.o.duckScale = Math.min(1.5, Math.max(0.1, v)); return this.o.duckScale; }
   setLaneCenterHalf(v) { this.o.laneCenterHalf = Math.min(0.3, Math.max(0.05, v)); return this.o.laneCenterHalf; }
 
   hipVelocity(t, hipY, torso) {
@@ -175,11 +179,11 @@ export class PoseController {
     if (!this.armed.duck && t - this.lastFired.duck > o.maxActionMs.duck) this.armed.duck = true;
 
     // jump
-    const k = o.actionScale;
+    const k = o.jumpScale, kd = o.duckScale;
     let jumpSignal, jumpThresh, mode;
-    if (anklesOk) { jumpSignal = Math.min(feetLift, hipLift * (o.jumpLift / o.jumpHipLift)); jumpThresh = o.jumpLift * k; mode = 'feet+hips'; }
+    if (anklesOk) { jumpSignal = hipLift > o.jumpHipFloor ? feetLift : Math.min(feetLift, 0); jumpThresh = o.jumpLift * k; mode = 'feet+hips'; }
     else { jumpSignal = Math.min(hipLift, noseLift); jumpThresh = o.jumpNoAnkleHipLift * k; mode = 'hips+nose (ankles hidden)'; }
-    const duckThresh = o.duckDrop * k;
+    const duckThresh = o.duckDrop * kd;
     const fastEnough = hipVel > o.jumpVelocity;
     if (this.armed.jump) {
       if (ready && jumpSignal > jumpThresh && fastEnough && t - this.lastFired.jump > o.cooldownMs.jump) {
@@ -193,7 +197,7 @@ export class PoseController {
     const noseDrop = -noseLift;
     if (noseDrop > duckThresh) { if (this.duckAboveSince === null) this.duckAboveSince = t; } else this.duckAboveSince = null;
     const duckHeld = this.duckAboveSince !== null && t - this.duckAboveSince >= o.duckHoldMs;
-    const duckNow = noseDrop > o.duckDrop || (noseDrop > duckThresh && (duckHeld || k >= 1));
+    const duckNow = noseDrop > o.duckDrop || (noseDrop > duckThresh && (duckHeld || kd >= 1));
     if (this.armed.duck) {
       if (ready && duckNow && t - this.lastFired.duck > o.cooldownMs.duck) {
         events.push('duck'); this.lastFired.duck = t; this.armed.duck = false;
@@ -204,7 +208,7 @@ export class PoseController {
 
     return {
       ready, lane: this.lane, laneChanged, events,
-      thresholds: { jump: jumpThresh, duck: duckThresh, velocity: o.jumpVelocity, scale: k, mode },
+      thresholds: { jump: jumpThresh, duck: duckThresh, velocity: o.jumpVelocity, jumpScale: k, duckScale: kd, mode },
       metrics: { tracking: true, anklesOk, torso, xm, torsoCenter: tc, laneBands: [0.5 - o.laneCenterHalf, 0.5 + o.laneCenterHalf], hipLift, noseLift, liftL, liftR, feetLift, jumpSignal, hipVel, noseDrop, noseY: nose.y, hipY, armedJump: this.armed.jump, armedDuck: this.armed.duck },
     };
   }

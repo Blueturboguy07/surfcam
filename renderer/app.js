@@ -91,11 +91,12 @@ const setLaneWidth = (delta) => { const v = ctrl.setLaneCenterHalf(ctrl.o.laneCe
 $('btnLaneN').onclick = () => setLaneWidth(-0.02);
 $('btnLaneW').onclick = () => setLaneWidth(+0.02);
 try { const v = parseFloat(localStorage.getItem('laneCenterHalf')); if (Number.isFinite(v)) { ctrl.setLaneCenterHalf(v); setLaneWidth(0); } } catch {}
-const setSens = (delta) => { const v = ctrl.setActionScale(ctrl.o.actionScale + delta); $('btnSensUp').textContent = `Jump/duck need ${Math.round(v * 100)}% ▸ less`; try { localStorage.setItem('actionScale', v); } catch {} };
-$('btnSensUp').onclick = () => setSens(-0.1);
-$('btnSensDown').onclick = () => setSens(+0.1);
-try { const v = parseFloat(localStorage.getItem('actionScale')); if (Number.isFinite(v)) ctrl.setActionScale(v); } catch {}
-setSens(0);
+const setJump = (delta) => { const v = ctrl.setJumpScale(ctrl.o.jumpScale + delta); $('btnJumpLess').textContent = `Jump need ${Math.round(v * 100)}% ▸ less`; try { localStorage.setItem('jumpScale', v); } catch {} };
+const setDuck = (delta) => { const v = ctrl.setDuckScale(ctrl.o.duckScale + delta); $('btnDuckLess').textContent = `Duck need ${Math.round(v * 100)}% ▸ less`; try { localStorage.setItem('duckScale', v); } catch {} };
+$('btnJumpLess').onclick = () => setJump(-0.05); $('btnJumpMore').onclick = () => setJump(+0.05);
+$('btnDuckLess').onclick = () => setDuck(-0.1); $('btnDuckMore').onclick = () => setDuck(+0.1);
+try { const j = parseFloat(localStorage.getItem('jumpScale')); if (Number.isFinite(j)) ctrl.setJumpScale(j); const d = parseFloat(localStorage.getItem('duckScale')); if (Number.isFinite(d)) ctrl.setDuckScale(d); } catch {}
+setJump(0); setDuck(0);
 $('btnGameOnly').onclick = () => { gameOnly = !gameOnly; $('btnGameOnly').textContent = 'Game only: ' + (gameOnly ? 'ON' : 'OFF'); $('btnGameOnly').className = gameOnly ? 'on' : ''; applyGameOnly(); };
 $('btnFull').onclick = () => { if (document.fullscreenElement) document.exitFullscreen(); else document.documentElement.requestFullscreen(); };
 $('btnCam').onclick = () => { camVisible = !camVisible; cam.classList.toggle('hidden', !camVisible); $('btnCam').textContent = camVisible ? 'Hide cam' : 'Show cam'; };

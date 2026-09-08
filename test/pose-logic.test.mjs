@@ -212,16 +212,22 @@ test('narrower centre band makes lanes easier to reach', () => {
   assert.equal(run(narrow, frames).pop().lane, 2);
 });
 
-test('half-size thresholds: a small hop and a shallow crouch register, jogging still does not', () => {
-  const c = new PoseController();   // default actionScale 0.5
+test('quarter jump / half duck (defaults): a small hop and a shallow crouch register, jogging still does not', () => {
+  const c = new PoseController();   // defaults: jumpScale 0.25, duckScale 0.5
   const res = run(c, [...standing(1500), ...jogging(6000), ...jump(260, { height: 0.2 }), ...jogging(2000), ...duck(600, { depth: 0.3 }), ...jogging(3000)]);
   assert.deepEqual(events(res), ['jump', 'duck']);
 });
 
-test('full-size thresholds (actionScale 1) reject the same small hop and shallow crouch', () => {
-  const c = new PoseController({ actionScale: 1 });
+test('full-size thresholds (scales 1) reject the same small hop and shallow crouch', () => {
+  const c = new PoseController({ jumpScale: 1, duckScale: 1 });
   const res = run(c, [...standing(1500), ...jump(260, { height: 0.2 }), ...standing(1000), ...duck(600, { depth: 0.3 }), ...standing(500)]);
   assert.deepEqual(events(res), []);
+});
+
+test('quarter jump: a 5 cm hop registers, ten seconds of jogging still fires nothing', () => {
+  const c = new PoseController();
+  const res = run(c, [...standing(1500), ...jogging(10000), ...jump(200, { height: 0.1 }), ...jogging(3000, { overlap: 0.1, hipBounce: 0.1, noseBounce: 0.2 })]);
+  assert.deepEqual(events(res), ['jump']);
 });
 
 test('laneFromX hysteresis table', () => {
