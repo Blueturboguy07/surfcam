@@ -1,8 +1,7 @@
 // SurfCam main process: serves the HUD page locally (so MediaPipe wasm + model load over http),
 // opens one window whose page hosts a <webview> with Poki's Subway Surfers, and exposes a few
 // IPC helpers used for verification (frame listing, eval inside the game iframe, status file).
-const { app, BrowserWindow, session, systemPreferences, ipcMain, webContents, nativeImage } = require('electron');
-const { analyze, CueEngine } = require('./cues');
+const { app, BrowserWindow, session, systemPreferences, ipcMain, webContents } = require('electron');
 const http = require('http');
 const fs = require('fs');
 const path = require('path');
@@ -33,78 +32,12 @@ function serve() {
 }
 
 // Dev/verification endpoint, loopback only: /__cmd?key=Up  |  /__cmd?probe=1  |  /__cmd?eval=<js>&frame=games.poki
-let recorder = null;
-// ---------- live obstacle cues ----------
-const cues = { enabled: true, engine: new CueEngine({ leadMs: 700 }), timer: null, busy: false, fps: 12, last: null, frameMs: 0 };
-function sendToHud(channel, payload) { for (const w of BrowserWindow.getAllWindows()) w.webContents.send(channel, payload); }
-function startCueLoop() {
-  if (cues.timer) return;
-  cues.timer = setInterval(async () => {
-    if (!cues.enabled || cues.busy) return;
-    const wc = webContents.getAllWebContents().find((w) => w.getURL().includes('poki.com'));
-    if (!wc) return;
-    cues.busy = true;
-    const t0 = Date.now();
-    try {
-      const img = (await wc.capturePage()).resize({ width: 320 });
-      const { width, height } = img.getSize();
-      const lanes = analyze(img.toBitmap(), width, height);
-      const cue = cues.engine.update(lanes, Date.now());
-      cues.last = { lanes, t: Date.now() };
-      sendToHud('lanes', { lanes, mine: cues.engine.history[cues.engine.history.length - 1] || null });
-      if (cue) { console.log('[cue]', JSON.stringify(cue)); sendToHud('cue', cue); }
-    } catch (e) { /* page not ready */ }
-    cues.frameMs = Date.now() - t0;
-    cues.busy = false;
-  }, 1000 / cues.fps);
-}
-ipcMain.on('cues-config', (_e, cfg) => { if (cfg.enabled !== undefined) cues.enabled = !!cfg.enabled; if (cfg.leadMs) cues.engine.leadMs = cfg.leadMs; console.log('[cue] config', JSON.stringify(cfg)); });
-
 async function handleCmd(u, res) {
   const reply = (code, body) => { res.writeHead(code, { 'Content-Type': 'application/json' }); res.end(JSON.stringify(body)); };
   try {
     const wc = webContents.getAllWebContents().find((w) => w.getURL().includes('poki.com'));
     if (!wc) return reply(500, { error: 'no poki webContents' });
     if (u.searchParams.get('focus')) { const w = BrowserWindow.getAllWindows()[0]; if (w) { w.show(); w.focus(); app.focus({ steal: true }); } return reply(200, { focused: true }); }
-    const cq = u.searchParams.get('cues');   // cues=status | cues=on | cues=off | cues=lead&ms=700
-    if (cq) {
-      if (cq === 'on' || cq === 'off') { cues.enabled = cq === 'on'; sendToHud('cues-state', { enabled: cues.enabled }); }
-      if (cq === 'lead') cues.engine.leadMs = Number(u.searchParams.get('ms')) || cues.engine.leadMs;
-      if (cq === 'test') sendToHud('cue', { action: u.searchParams.get('action') || 'jump', kind: 'test', etaMs: 900, t: Date.now() });
-      return reply(200, { enabled: cues.enabled, leadMs: cues.engine.leadMs, frameMs: cues.frameMs, last: cues.last, lastCue: cues.engine.lastCue, history: cues.engine.history.slice(-40) });
-    }
-    if (u.searchParams.get('keys')) { sendToHud('set-keys', { on: u.searchParams.get('keys') === 'on' }); return reply(200, { keys: u.searchParams.get('keys') }); }
-    const dir = u.searchParams.get('analyzeFrames'); // offline: run the detector + cue engine over a recorded frame dir
-    if (dir) {
-      const files = fs.readdirSync(dir).filter((f) => f.endsWith('.jpg')).sort();
-      const eng = new CueEngine({ leadMs: Number(u.searchParams.get('lead')) || 700 });
-      const rows = [];
-      for (const f of files) {
-        const img = nativeImage.createFromPath(path.join(dir, f)).resize({ width: 320 });
-        const { width, height } = img.getSize();
-        const t = Number(f.slice(0, -4));
-        const lanes = analyze(img.toBitmap(), width, height);
-        const cue = eng.update(lanes, t);
-        rows.push({ f, lanes, cue });
-      }
-      return reply(200, { frames: rows.length, rows });
-    }
-    const rec = u.searchParams.get('record'); // record=start&fps=10 | record=stop | record=status  → JPEG frames of the game view
-    if (rec === 'start') {
-      if (recorder) return reply(200, { already: recorder.dir, frames: recorder.n });
-      const fps = Number(u.searchParams.get('fps')) || 10;
-      const dir = u.searchParams.get('dir') || path.join(ROOT, 'frames', new Date().toISOString().replace(/[:.]/g, '-'));
-      fs.mkdirSync(dir, { recursive: true });
-      recorder = { dir, n: 0, busy: false };
-      recorder.timer = setInterval(async () => {
-        if (recorder.busy) return; recorder.busy = true;
-        try { const img = await wc.capturePage(); const t = Date.now(); fs.writeFile(path.join(dir, `${t}.jpg`), img.toJPEG(85), () => {}); recorder.n++; } catch {}
-        recorder.busy = false;
-      }, 1000 / fps);
-      return reply(200, { recording: dir, fps });
-    }
-    if (rec === 'stop') { if (!recorder) return reply(200, { stopped: null }); clearInterval(recorder.timer); const r = recorder; recorder = null; return reply(200, { stopped: r.dir, frames: r.n }); }
-    if (rec === 'status') return reply(200, { recording: !!recorder, dir: recorder?.dir, frames: recorder?.n });
     const click = u.searchParams.get('click'); // fractions of the webview viewport, e.g. click=0.5,0.6
     if (click) {
       const [fx, fy] = click.split(',').map(Number);
@@ -151,7 +84,6 @@ app.whenReady().then(async () => {
     webPreferences: { webviewTag: true, contextIsolation: true, nodeIntegration: false, preload: path.join(ROOT, 'preload.js') },
   });
   win.loadURL(`http://127.0.0.1:${port}/renderer/index.html`);
-  startCueLoop();
   win.on('closed', () => app.quit());
   console.log('[surfcam] HUD at http://127.0.0.1:' + port);
   if (process.env.SURFCAM_PROBE) require('./probe').probe().catch((e) => console.log('[probe] failed', String(e)));
