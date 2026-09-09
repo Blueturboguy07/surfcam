@@ -49,6 +49,8 @@ async function handleCmd(u, res) {
       wc.sendInputEvent({ type: 'mouseUp', x, y, button: 'left', clickCount: 1 });
       return reply(200, { clicked: [x, y], viewport: size });
     }
+    const shot = u.searchParams.get('shot'); // capture the whole app window (HUD + game) to a PNG path (dev)
+    if (shot) { const w = BrowserWindow.getAllWindows()[0]; const img = await w.webContents.capturePage(); fs.writeFileSync(shot, img.toPNG()); return reply(200, { saved: shot, size: img.getSize() }); }
     const hostkey = u.searchParams.get('hostkey'); // press a key in the HUD page itself (dev)
     if (hostkey) { const w = BrowserWindow.getAllWindows()[0]; w.webContents.sendInputEvent({ type: 'keyDown', keyCode: hostkey }); await new Promise((r) => setTimeout(r, 40)); w.webContents.sendInputEvent({ type: 'keyUp', keyCode: hostkey }); return reply(200, { hostkey }); }
     const key = u.searchParams.get('key');
