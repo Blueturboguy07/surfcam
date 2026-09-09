@@ -17,26 +17,27 @@
     <div id="lane-strip"><span>L</span><span>C</span><span>R</span></div>
     <div id="flash"></div>
     <pre id="status">starting camera…</pre>
-    <div id="manual">
-      <button id="btnLeft" title="send Left">◀</button>
-      <button id="btnUp" title="send Up (jump)">▲</button>
-      <button id="btnDown" title="send Down (roll)">▼</button>
-      <button id="btnRight" title="send Right">▶</button>
-      <button id="btnStart" title="send Space: start a run / hoverboard">Start (Space)</button>
-    </div>
     <div id="buttons">
-      <button id="btnKeys" class="on">Keys: ON</button>
-      <button id="btnCenter">Recenter lane</button>
-      <button id="btnFocus">Focus game</button>
-      <button id="btnCam">Hide cam</button>
-      <button id="btnGameOnly" class="on">Game only: ON</button>
-      <button id="btnFull">Fullscreen</button>
-      <button id="btnLaneN">Lanes: centre 33% ▸ narrower</button>
-      <button id="btnLaneW">Lanes ▸ wider</button>
-      <button id="btnJumpLess">Jump need 25% ▸ less</button>
-      <button id="btnJumpMore">Jump ▸ more</button>
-      <button id="btnDuckLess">Duck need 50% ▸ less</button>
-      <button id="btnDuckMore">Duck ▸ more</button>
+      <button id="btnKeys" class="on" title="k">Keys ON</button>
+      <button id="btnCenter" title="c">Recenter</button>
+      <button id="btnFocus" title="f">Focus</button>
+      <button id="btnCam">Cam</button>
+      <button id="btnFull">Full</button>
+      <button id="btnSettings" title="s">⚙</button>
+    </div>
+    <div id="settings" hidden>
+      <div class="row"><button id="btnGameOnly" class="on">Game only: ON</button></div>
+      <div class="row"><button id="btnLaneN">Lanes 33% ▸ narrower</button><button id="btnLaneW">▸ wider</button></div>
+      <div class="row"><button id="btnJumpLess">Jump 25% ▸ less</button><button id="btnJumpMore">▸ more</button></div>
+      <div class="row"><button id="btnDuckLess">Duck 50% ▸ less</button><button id="btnDuckMore">▸ more</button></div>
+      <div class="row" id="manual">
+        <button id="btnLeft" title="send Left">◀</button>
+        <button id="btnUp" title="send Up (jump)">▲</button>
+        <button id="btnDown" title="send Down (roll)">▼</button>
+        <button id="btnRight" title="send Right">▶</button>
+        <button id="btnStart" title="send Space: start a run / hoverboard">Space</button>
+      </div>
+      <div class="row"><button id="btnReset" class="danger">Reset to defaults</button></div>
     </div>
   </div>
 

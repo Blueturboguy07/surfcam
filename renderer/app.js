@@ -27,6 +27,7 @@ const out = new KeystrokeOutput(game);
 
 // ---------- state ----------
 const ctrl = new PoseController();
+const CONFIGURED = { laneCenterHalf: 1 / 6, jumpScale: 0.25, duckScale: 0.5, keysOn: true, gameOnly: true, camVisible: true };
 let keysOn = true, camVisible = true;
 let gameLane = 1, desiredLane = 1, movingLane = false;
 let fps = 0, frames = 0, fpsT = performance.now();
@@ -84,22 +85,22 @@ game.addEventListener('did-navigate-in-page', () => applyGameOnly());
 game.addEventListener('did-navigate', (e) => log('game navigated', e.url));
 
 // ---------- buttons ----------
-$('btnKeys').onclick = () => { keysOn = !keysOn; $('btnKeys').textContent = 'Keys: ' + (keysOn ? 'ON' : 'OFF'); $('btnKeys').className = keysOn ? 'on' : 'off'; };
+$('btnKeys').onclick = () => { keysOn = !keysOn; $('btnKeys').textContent = 'Keys ' + (keysOn ? 'ON' : 'OFF'); $('btnKeys').className = keysOn ? 'on' : 'off'; };
 $('btnCenter').onclick = () => { gameLane = 1; desiredLane = ctrl.lane; syncLane(); };
 $('btnFocus').onclick = focusGame;
-const setLaneWidth = (delta) => { const v = ctrl.setLaneCenterHalf(ctrl.o.laneCenterHalf + delta); $('btnLaneN').textContent = `Lanes: centre ${Math.round(v * 200)}% ▸ narrower`; try { localStorage.setItem('laneCenterHalf', v); } catch {} };
+const setLaneWidth = (delta) => { const v = ctrl.setLaneCenterHalf(ctrl.o.laneCenterHalf + delta); $('btnLaneN').textContent = `Lanes ${Math.round(v * 200)}% ▸ narrower`; try { localStorage.setItem('laneCenterHalf', v); } catch {} };
 $('btnLaneN').onclick = () => setLaneWidth(-0.02);
 $('btnLaneW').onclick = () => setLaneWidth(+0.02);
 try { const v = parseFloat(localStorage.getItem('laneCenterHalf')); if (Number.isFinite(v)) { ctrl.setLaneCenterHalf(v); setLaneWidth(0); } } catch {}
-const setJump = (delta) => { const v = ctrl.setJumpScale(ctrl.o.jumpScale + delta); $('btnJumpLess').textContent = `Jump need ${Math.round(v * 100)}% ▸ less`; try { localStorage.setItem('jumpScale', v); } catch {} };
-const setDuck = (delta) => { const v = ctrl.setDuckScale(ctrl.o.duckScale + delta); $('btnDuckLess').textContent = `Duck need ${Math.round(v * 100)}% ▸ less`; try { localStorage.setItem('duckScale', v); } catch {} };
+const setJump = (delta) => { const v = ctrl.setJumpScale(ctrl.o.jumpScale + delta); $('btnJumpLess').textContent = `Jump ${Math.round(v * 100)}% ▸ less`; try { localStorage.setItem('jumpScale', v); } catch {} };
+const setDuck = (delta) => { const v = ctrl.setDuckScale(ctrl.o.duckScale + delta); $('btnDuckLess').textContent = `Duck ${Math.round(v * 100)}% ▸ less`; try { localStorage.setItem('duckScale', v); } catch {} };
 $('btnJumpLess').onclick = () => setJump(-0.05); $('btnJumpMore').onclick = () => setJump(+0.05);
 $('btnDuckLess').onclick = () => setDuck(-0.1); $('btnDuckMore').onclick = () => setDuck(+0.1);
 try { const j = parseFloat(localStorage.getItem('jumpScale')); if (Number.isFinite(j)) ctrl.setJumpScale(j); const d = parseFloat(localStorage.getItem('duckScale')); if (Number.isFinite(d)) ctrl.setDuckScale(d); } catch {}
 setJump(0); setDuck(0);
 $('btnGameOnly').onclick = () => { gameOnly = !gameOnly; $('btnGameOnly').textContent = 'Game only: ' + (gameOnly ? 'ON' : 'OFF'); $('btnGameOnly').className = gameOnly ? 'on' : ''; applyGameOnly(); };
 $('btnFull').onclick = () => { if (document.fullscreenElement) document.exitFullscreen(); else document.documentElement.requestFullscreen(); };
-$('btnCam').onclick = () => { camVisible = !camVisible; cam.classList.toggle('hidden', !camVisible); $('btnCam').textContent = camVisible ? 'Hide cam' : 'Show cam'; };
+$('btnCam').onclick = () => { camVisible = !camVisible; cam.classList.toggle('hidden', !camVisible); $('btnCam').textContent = camVisible ? 'Cam' : 'Cam off'; };
 // ---------- manual test controls: same output layer the detector uses ----------
 const manual = {
   left: () => { out.left(); gameLane = Math.max(0, gameLane - 1); flash('◀ LEFT'); },
@@ -114,12 +115,27 @@ function flash(text, cls = 'manual') {
   setTimeout(() => { if (performance.now() - lastEventT > 350) flashEl.className = ''; }, 400);
 }
 $('btnStart').onclick = manual.start; $('btnLeft').onclick = manual.left; $('btnRight').onclick = manual.right; $('btnUp').onclick = manual.jump; $('btnDown').onclick = manual.duck;
+$('btnSettings').onclick = () => { const p = $('settings'); p.hidden = !p.hidden; $('btnSettings').className = p.hidden ? '' : 'on'; };
+$('btnReset').onclick = () => {
+  try { for (const k of ['laneCenterHalf', 'jumpScale', 'duckScale']) localStorage.removeItem(k); } catch {}
+  ctrl.setLaneCenterHalf(CONFIGURED.laneCenterHalf); setLaneWidth(0);
+  ctrl.setJumpScale(CONFIGURED.jumpScale); setJump(0);
+  ctrl.setDuckScale(CONFIGURED.duckScale); setDuck(0);
+  if (keysOn !== CONFIGURED.keysOn) $('btnKeys').click();
+  if (gameOnly !== CONFIGURED.gameOnly) $('btnGameOnly').click();
+  if (camVisible !== CONFIGURED.camVisible) $('btnCam').click();
+  gameLane = 1; desiredLane = ctrl.lane;
+  flash('RESET TO DEFAULTS');
+  log('settings reset to defaults');
+};
 window.addEventListener('keydown', (e) => {
   if (e.key === 'k') $('btnKeys').click();
   if (e.key === 'c') $('btnCenter').click();
   if (e.key === 'f') focusGame();
+  if (e.key === 'h') document.getElementById('hud').classList.toggle('collapsed');
+  if (e.key === 's' && !e.metaKey) { $('btnSettings').click(); return; }
   if (e.key === ' ') { e.preventDefault(); manual.start(); }
-  const map = { ArrowLeft: manual.left, ArrowRight: manual.right, ArrowUp: manual.jump, ArrowDown: manual.duck, a: manual.left, d: manual.right, w: manual.jump, s: manual.duck };
+  const map = { ArrowLeft: manual.left, ArrowRight: manual.right, ArrowUp: manual.jump, ArrowDown: manual.duck, a: manual.left, d: manual.right, w: manual.jump };
   if (map[e.key]) { e.preventDefault(); map[e.key](); }
 });
 
@@ -164,14 +180,9 @@ function setStatus(m, res) {
   const f = (v, d = 2) => (Number.isFinite(v) ? v.toFixed(d) : '—');
   laneSpans.forEach((s, i) => s.classList.toggle('active', i === (res?.lane ?? 1)));
   statusEl.textContent = [
-    `${modelReady ? 'model ok' : 'loading model…'}  ${fps} fps  ${tracking ? 'TRACKING' : 'no person'}${res?.ready ? '' : tracking ? ' (calibrating)' : ''}`,
-    `lane ${['L', 'C', 'R'][res?.lane ?? 1]}  dot ${f(m?.xm)}  game ${['L', 'C', 'R'][gameLane]}  keys ${keysOn ? 'ON' : 'OFF'}  sent ${out.sent}${out.last ? ' ' + out.last : ''}`,
-    `mode: ${lastThresholds?.mode ?? '—'}   pose lost ${lostCount}x`,
-    `JUMP signal ${f(m?.jumpSignal)} / need ${f(lastThresholds?.jump)}   rise ${f(m?.hipVel, 1)} / need ${f(lastThresholds?.velocity, 1)}${m?.armedJump === false ? ' (re-arming)' : ''}`,
-    `DUCK signal ${f(m?.noseDrop)} / need ${f(lastThresholds?.duck)}${m?.armedDuck === false ? ' (re-arming)' : ''}`,
-    `feet ${f(m?.feetLift)}  hips ${f(m?.hipLift)}  nose ${f(m?.noseLift)}  torso ${f(m?.torso, 3)}`,
-    `last: ${lastEvent || '—'}   [k] keys  [c] recenter  [f] focus game`,
-    `manual test: arrows / WASD (click the HUD first) or the ◀ ▲ ▼ ▶ buttons`,
+    `${modelReady ? '' : 'loading… '}${fps}fps ${tracking ? 'TRACK' : 'no person'}${res?.ready ? '' : tracking ? ' (cal)' : ''} ${lastThresholds?.mode?.includes('hidden') ? 'feet hidden' : 'feet ok'} lost ${lostCount}`,
+    `lane ${['L', 'C', 'R'][res?.lane ?? 1]}  dot ${f(m?.xm)}  keys ${keysOn ? 'ON' : 'OFF'}  sent ${out.sent}  ${lastEvent || ''}`,
+    `jump ${f(m?.jumpSignal)}/${f(lastThresholds?.jump)} rise ${f(m?.hipVel, 1)}/${f(lastThresholds?.velocity, 1)}   duck ${f(m?.noseDrop)}/${f(lastThresholds?.duck)}`,
   ].join('\n');
 }
 
