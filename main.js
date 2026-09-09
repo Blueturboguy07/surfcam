@@ -73,8 +73,18 @@ async function handleCmd(u, res) {
   } catch (e) { return reply(500, { error: String(e) }); }
 }
 
+// Test hook: Chromium's synthetic camera, so a machine with no webcam (CI, a fresh VM) can prove the
+// whole path — local server, renderer, camera stream, MediaPipe wasm + model, frame loop.
+const FAKE_CAMERA = !!process.env.SURFCAM_FAKE_CAMERA;
+if (FAKE_CAMERA) {
+  app.commandLine.appendSwitch('use-fake-device-for-media-stream');
+  app.commandLine.appendSwitch('use-fake-ui-for-media-stream');
+}
+
 app.whenReady().then(async () => {
-  if (process.platform === 'darwin') {
+  // macOS is the only platform with a system-level camera prompt to trigger up front; Windows and
+  // Linux hand the stream over as soon as the page asks (Windows Settings › Privacy › Camera permitting).
+  if (process.platform === 'darwin' && !FAKE_CAMERA) {
     const ok = await systemPreferences.askForMediaAccess('camera');
     console.log('[surfcam] camera access granted:', ok);
   }

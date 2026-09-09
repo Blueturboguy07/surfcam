@@ -195,10 +195,18 @@ async function main() {
   log('camera', video.videoWidth + 'x' + video.videoHeight);
 
   const vision = await FilesetResolver.forVisionTasks('/node_modules/@mediapipe/tasks-vision/wasm');
-  const landmarker = await PoseLandmarker.createFromOptions(vision, {
-    baseOptions: { modelAssetPath: '/models/pose_landmarker_lite.task', delegate: 'GPU' },
+  const options = (delegate) => ({
+    baseOptions: { modelAssetPath: '/models/pose_landmarker_lite.task', delegate },
     runningMode: 'VIDEO', numPoses: 1, minPoseDetectionConfidence: 0.5, minTrackingConfidence: 0.5,
   });
+  let landmarker;
+  try {
+    landmarker = await PoseLandmarker.createFromOptions(vision, options('GPU'));
+  } catch (e) {
+    // No usable WebGL (a VM, a remote desktop, a very old GPU): the CPU delegate is slower but identical.
+    log('GPU delegate unavailable, falling back to CPU:', String(e));
+    landmarker = await PoseLandmarker.createFromOptions(vision, options('CPU'));
+  }
   modelReady = true; log('pose model ready');
 
   let lastVideoT = -1, lastStatusT = 0;

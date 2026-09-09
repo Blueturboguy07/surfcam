@@ -2,3 +2,4 @@ node_modules/
 status.json
 frames/
 trace.jsonl
+dist/

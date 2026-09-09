@@ -4,12 +4,84 @@
   "private": true,
   "description": "Webcam pose controller + HUD wrapped around Subway Surfers (Poki web build)",
   "main": "main.js",
+  "author": "Mann Bellani",
+  "license": "AGPL-3.0",
+  "homepage": "https://github.com/Blueturboguy07/surfcam",
   "scripts": {
     "start": "electron .",
-    "test": "node --test test/*.test.mjs"
+    "test": "node --test test/*.test.mjs",
+    "smoke": "node test/smoke.mjs",
+    "dist:mac": "electron-builder --mac --universal --publish never",
+    "dist:win": "electron-builder --win --x64 --publish never"
   },
   "dependencies": {
-    "@mediapipe/tasks-vision": "^1.0.1",
-    "electron": "^44.2.0"
+    "@mediapipe/tasks-vision": "^1.0.1"
+  },
+  "devDependencies": {
+    "electron": "^44.2.0",
+    "electron-builder": "^26.15.3"
+  },
+  "build": {
+    "appId": "com.publik.surfcam",
+    "productName": "SurfCam",
+    "copyright": "Copyright © 2026 Mann Bellani. AGPL-3.0.",
+    "directories": {
+      "output": "dist",
+      "buildResources": "build"
+    },
+    "files": [
+      "main.js",
+      "preload.js",
+      "probe.js",
+      "renderer/**",
+      "models/**",
+      "package.json"
+    ],
+    "asar": true,
+    "publish": {
+      "provider": "github",
+      "owner": "Blueturboguy07",
+      "repo": "surfcam"
+    },
+    "mac": {
+      "category": "public.app-category.healthcare-fitness",
+      "target": [
+        {
+          "target": "dmg",
+          "arch": [
+            "universal"
+          ]
+        }
+      ],
+      "artifactName": "${productName}-${version}-mac-${arch}.${ext}",
+      "hardenedRuntime": true,
+      "gatekeeperAssess": false,
+      "entitlements": "build/entitlements.mac.plist",
+      "entitlementsInherit": "build/entitlements.mac.plist",
+      "extendInfo": {
+        "NSCameraUsageDescription": "SurfCam watches your webcam to turn steps, jumps and crouches into game moves. Video never leaves your computer."
+      },
+      "notarize": true
+    },
+    "dmg": {
+      "sign": true
+    },
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "artifactName": "${productName}-Setup-${version}-win-${arch}.${ext}"
+    },
+    "nsis": {
+      "oneClick": true,
+      "perMachine": false,
+      "shortcutName": "SurfCam",
+      "deleteAppDataOnUninstall": false
+    }
   }
 }

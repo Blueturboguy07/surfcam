@@ -1,0 +1,70 @@
+# Windows build + test, on a real Windows machine. The macOS build is produced, signed, notarized
+# and launch-tested on the maintainer's Mac (see README › Releasing), because the Developer ID
+# certificate lives in that keychain. Both installers end up on the same GitHub release.
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  unit:
+    name: Unit tests (Linux)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: npm }
+      - run: npm ci
+      - run: npm test
+
+  windows:
+    name: Windows installer + launch test
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: npm }
+      - run: npm ci
+      - run: npm test
+
+      - name: Build the installer
+        run: npx electron-builder --win --x64 --publish never
+
+      - name: Launch-test the packaged app (synthetic camera)
+        run: node test/smoke.mjs dist/win-unpacked/SurfCam.exe
+
+      - name: Install with the real installer, then launch-test the installed copy
+        shell: pwsh
+        run: |
+          $setup = Get-ChildItem dist/*.exe | Select-Object -First 1
+          Write-Host "installing $($setup.FullName)"
+          $p = Start-Process -FilePath $setup.FullName -ArgumentList '/S' -Wait -PassThru
+          if ($p.ExitCode -ne 0) { throw "installer exited $($p.ExitCode)" }
+          Get-Process SurfCam -ErrorAction SilentlyContinue | Stop-Process -Force
+          $exe = Join-Path $env:LOCALAPPDATA 'Programs\SurfCam\SurfCam.exe'
+          if (!(Test-Path $exe)) {
+            Get-ChildItem (Join-Path $env:LOCALAPPDATA 'Programs') -Recurse -Filter SurfCam.exe | Format-List FullName
+            throw "installed SurfCam.exe not found at $exe"
+          }
+          node test/smoke.mjs $exe
+
+      - name: Attach the installer to the release
+        if: startsWith(github.ref, 'refs/tags/')
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          tag="${GITHUB_REF_NAME}"
+          gh release view "$tag" >/dev/null 2>&1 || gh release create "$tag" --title "SurfCam $tag" --notes "SurfCam $tag"
+          gh release upload "$tag" dist/*.exe --clobber
+          gh release view "$tag" --json assets --jq '.assets[].name'
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: surfcam-windows
+          path: dist/*.exe
