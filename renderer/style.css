@@ -21,3 +21,12 @@ html, body { margin: 0; height: 100%; background: #000; overflow: hidden; font: 
 #manual button { padding: 8px 0; border: 0; border-radius: 6px; background: rgba(255,255,255,.22); color: #fff; font: 700 16px/1 ui-monospace, monospace; cursor: pointer; }
 #manual button:active { background: #60a5fa; color: #000; }
 #flash.manual { background: #a78bfa; color: #000; opacity: 1; }
+/* obstacle cue overlay: centred over the game, never intercepts clicks */
+#cue { position: absolute; left: 50%; top: 22%; transform: translateX(-50%); z-index: 9; pointer-events: none; text-align: center; opacity: 0; transition: opacity .08s; }
+#cue.show { opacity: 1; }
+#cue-word { font: 900 96px/1 ui-sans-serif, system-ui, sans-serif; letter-spacing: .04em; color: #fff; text-shadow: 0 0 18px rgba(0,0,0,.9), 0 4px 0 #000; }
+#cue.jump #cue-word { color: #60a5fa; } #cue.duck #cue-word { color: #f59e0b; } #cue.left #cue-word, #cue.right #cue-word { color: #34d399; }
+#cue-bar { width: 360px; height: 10px; margin: 10px auto 0; background: rgba(0,0,0,.5); border-radius: 5px; overflow: hidden; }
+#cue-bar i { display: block; height: 100%; background: #fff; transform-origin: left; }
+#cue.pulse #cue-word { animation: cuepulse .18s ease-out 3; }
+@keyframes cuepulse { 0% { transform: scale(1); } 50% { transform: scale(1.18); } 100% { transform: scale(1); } }

@@ -97,6 +97,29 @@ $('btnJumpLess').onclick = () => setJump(-0.05); $('btnJumpMore').onclick = () =
 $('btnDuckLess').onclick = () => setDuck(-0.1); $('btnDuckMore').onclick = () => setDuck(+0.1);
 try { const j = parseFloat(localStorage.getItem('jumpScale')); if (Number.isFinite(j)) ctrl.setJumpScale(j); const d = parseFloat(localStorage.getItem('duckScale')); if (Number.isFinite(d)) ctrl.setDuckScale(d); } catch {}
 setJump(0); setDuck(0);
+// ---------- obstacle cues (from the main-process frame watcher) ----------
+const cueEl = $('cue'), cueWord = $('cue-word'), cueBar = document.querySelector('#cue-bar i');
+let cuesOn = true, leadMs = 700, cueTimer = null, lastLanes = null, lastMine = null;
+const CUE_TEXT = { left: '◀ LEFT', right: 'RIGHT ▶', jump: '▲ JUMP', duck: '▼ DUCK' };
+function showCue(cue) {
+  if (!cuesOn) return;
+  cueWord.textContent = CUE_TEXT[cue.action] || cue.action.toUpperCase();
+  cueEl.className = 'show pulse ' + cue.action;
+  const start = performance.now(), dur = Math.max(250, cue.etaMs);
+  clearInterval(cueTimer);
+  cueTimer = setInterval(() => {
+    const p = 1 - (performance.now() - start) / dur;
+    cueBar.style.transform = `scaleX(${Math.max(0, p)})`;
+    if (p <= -0.6) { clearInterval(cueTimer); cueEl.className = ''; }
+  }, 30);
+  log('CUE', JSON.stringify(cue));
+}
+window.surf?.onCue(showCue);
+window.surf?.onLanes((d) => { lastLanes = d.lanes; lastMine = d.mine; });
+window.surf?.onCuesState((d) => { cuesOn = d.enabled; $('btnCues').textContent = 'Cues: ' + (cuesOn ? 'ON' : 'OFF'); $('btnCues').className = cuesOn ? 'on' : ''; });
+window.surf?.onSetKeys((d) => { if (keysOn !== d.on) $('btnKeys').click(); });
+$('btnCues').onclick = () => { cuesOn = !cuesOn; $('btnCues').textContent = 'Cues: ' + (cuesOn ? 'ON' : 'OFF'); $('btnCues').className = cuesOn ? 'on' : ''; window.surf?.cuesConfig({ enabled: cuesOn }); if (!cuesOn) cueEl.className = ''; };
+$('btnLead').onclick = () => { leadMs = leadMs >= 1200 ? 400 : leadMs + 100; $('btnLead').textContent = `Lead ${leadMs}ms ▸ +100`; window.surf?.cuesConfig({ leadMs }); };
 $('btnGameOnly').onclick = () => { gameOnly = !gameOnly; $('btnGameOnly').textContent = 'Game only: ' + (gameOnly ? 'ON' : 'OFF'); $('btnGameOnly').className = gameOnly ? 'on' : ''; applyGameOnly(); };
 $('btnFull').onclick = () => { if (document.fullscreenElement) document.exitFullscreen(); else document.documentElement.requestFullscreen(); };
 $('btnCam').onclick = () => { camVisible = !camVisible; cam.classList.toggle('hidden', !camVisible); $('btnCam').textContent = camVisible ? 'Hide cam' : 'Show cam'; };
@@ -172,6 +195,7 @@ function setStatus(m, res) {
     `feet ${f(m?.feetLift)}  hips ${f(m?.hipLift)}  nose ${f(m?.noseLift)}  torso ${f(m?.torso, 3)}`,
     `last: ${lastEvent || '—'}   [k] keys  [c] recenter  [f] focus game`,
     `manual test: arrows / WASD (click the HUD first) or the ◀ ▲ ▼ ▶ buttons`,
+    `obstacles: L ${lastLanes?.[0] ? lastLanes[0].bottom.toFixed(2) : '—'}  MINE ${lastMine ? `${lastMine.kind} y${lastMine.bottom.toFixed(2)} h${lastMine.height.toFixed(2)} eta ${lastMine.etaMs}ms` : '—'}  R ${lastLanes?.[2] ? lastLanes[2].bottom.toFixed(2) : '—'}`,
   ].join('\n');
 }
 
