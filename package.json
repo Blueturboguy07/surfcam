@@ -33,6 +33,7 @@
       "main.js",
       "preload.js",
       "probe.js",
+      "publik-telemetry.cjs",
       "renderer/**",
       "models/**",
       "package.json"

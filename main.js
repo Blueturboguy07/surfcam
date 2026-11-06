@@ -82,6 +82,10 @@ if (FAKE_CAMERA) {
 }
 
 app.whenReady().then(async () => {
+  // Usage counts (app opened, active session) for the publik listing. Runs in the background, sends
+  // no content, off with DO_NOT_TRACK=1. See README › Usage counts.
+  require('./publik-telemetry.cjs').start('surfcam', app.getVersion());
+
   // macOS is the only platform with a system-level camera prompt to trigger up front; Windows and
   // Linux hand the stream over as soon as the page asks (Windows Settings › Privacy › Camera permitting).
   if (process.platform === 'darwin' && !FAKE_CAMERA) {

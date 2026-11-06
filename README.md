@@ -41,6 +41,14 @@ Poki's own UI. **Fullscreen** takes the whole app fullscreen (Esc exits).
 HUD buttons: `Keys: ON/OFF` (or `k`) pauses key sending so you can use the mouse on Poki's UI.
 `Recenter lane` (or `c`) tells the controller the character is back in the centre lane.
 
+## Usage counts
+
+SurfCam sends two usage events to publik: `app_opened` at launch and `active_session` every 30 minutes
+while it runs. Each event holds the app name, the app version, the operating system, the CPU type and a
+random install ID. If this computer holds a publik key for SurfCam, the event carries that key too.
+No video, no pose data, no key presses and no personal data are sent. To turn it off, set
+`DO_NOT_TRACK=1` in the environment. Details: https://publikhq.com/skills/telemetry.md
+
 ## How detection works (`renderer/pose-logic.mjs`, tested by `npm test`)
 
 - Every vertical measure is divided by torso length, so distance from the camera does not matter.
