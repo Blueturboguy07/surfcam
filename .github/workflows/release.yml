@@ -11,9 +11,41 @@ on:
 permissions:
   contents: write
 
+env:
+  # A CI launch is not a user: the launch tests send no usage counts.
+  DO_NOT_TRACK: '1'
+
 jobs:
+  # A release that already holds a Windows installer keeps it. A publik release is built by
+  # publik-build.yml and its files are verified while the release is a draft; publishing the draft
+  # creates the tag, and that tag must not rebuild or replace the verified files. Any error here
+  # stops the workflow (the other jobs need this one).
+  guard:
+    name: Guard (does the release already hold an installer?)
+    runs-on: ubuntu-latest
+    outputs:
+      build: ${{ steps.check.outputs.build }}
+    steps:
+      - id: check
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          build=true
+          if [[ "$GITHUB_REF" == refs/tags/* ]]; then
+            names="$(gh api "repos/$GITHUB_REPOSITORY/releases" --paginate --jq ".[] | select(.tag_name == \"$GITHUB_REF_NAME\") | .assets[].name")"
+            if grep -q -i '\.exe$' <<<"$names"; then
+              echo "release $GITHUB_REF_NAME already holds a Windows installer: nothing to build"
+              build=false
+            fi
+          fi
+          echo "build=$build" >> "$GITHUB_OUTPUT"
+
   unit:
     name: Unit tests (Linux)
+    needs: guard
+    if: needs.guard.outputs.build == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -24,6 +56,8 @@ jobs:
 
   windows:
     name: Windows installer + launch test
+    needs: guard
+    if: needs.guard.outputs.build == 'true'
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
@@ -61,7 +95,7 @@ jobs:
         run: |
           tag="${GITHUB_REF_NAME}"
           gh release view "$tag" >/dev/null 2>&1 || gh release create "$tag" --title "SurfCam $tag" --notes "SurfCam $tag"
-          gh release upload "$tag" dist/*.exe --clobber
+          gh release upload "$tag" dist/*.exe   # no --clobber: an installer that is already there is never replaced
           gh release view "$tag" --json assets --jq '.assets[].name'
 
       - uses: actions/upload-artifact@v4

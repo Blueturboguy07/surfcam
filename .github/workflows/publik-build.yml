@@ -1,0 +1,112 @@
+# publik build: compiles the downloads of a publik release. It does not sign, it does not publish and
+# it does not create a release: every file leaves as a workflow artifact.
+#   macOS   -> the universal SurfCam.app, unsigned. The maintainer's Mac signs it with the Developer ID,
+#              notarizes it, staples it and packs the dmg (the certificate lives in that keychain).
+#   Windows -> the normal one-click installer, unsigned, launch-tested on this runner.
+name: publik build
+
+on:
+  push:
+    branches: ['telemetry/**']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: publik-build-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  macos:
+    name: macOS universal app (unsigned)
+    runs-on: macos-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: npm }
+      - run: npm ci
+
+      - name: Build the universal app, unsigned
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+        run: npx electron-builder --mac dir --universal --publish never -c.mac.identity=null -c.mac.notarize=false
+
+      - name: Check the app
+        run: |
+          set -euo pipefail
+          app=dist/mac-universal/SurfCam.app
+          test -d "$app"
+          want="$(node -p "require('./package.json').version")"
+          got="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$app/Contents/Info.plist")"
+          echo "version: $got (want $want)"; test "$got" = "$want"
+          archs="$(lipo -archs "$app/Contents/MacOS/SurfCam")"
+          echo "architectures: $archs"
+          echo "$archs" | grep -q x86_64; echo "$archs" | grep -q arm64
+          npx asar list "$app/Contents/Resources/app.asar" > asar-list.txt
+          grep -x '/publik-telemetry.cjs' asar-list.txt
+          grep -x '/main.js' asar-list.txt
+
+      - name: Pack the app (ditto keeps the symlinks)
+        run: ditto -c -k --keepParent dist/mac-universal/SurfCam.app SurfCam-mac-universal-unsigned-app.zip
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: surfcam-mac-universal-unsigned-app
+          path: SurfCam-mac-universal-unsigned-app.zip
+          compression-level: 0
+          if-no-files-found: error
+          retention-days: 7
+
+  windows:
+    name: Windows installer (unsigned) + launch tests
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: npm }
+      - run: npm ci
+      - run: npm test
+
+      - name: Build the installer
+        run: npx electron-builder --win --x64 --publish never
+
+      - name: Install with the real installer
+        shell: pwsh
+        run: |
+          $setup = Get-ChildItem dist/*.exe | Select-Object -First 1
+          Write-Host "installing $($setup.FullName)"
+          $p = Start-Process -FilePath $setup.FullName -ArgumentList '/S' -Wait -PassThru
+          if ($p.ExitCode -ne 0) { throw "installer exited $($p.ExitCode)" }
+          Get-Process SurfCam -ErrorAction SilentlyContinue | Stop-Process -Force
+          $exe = Join-Path $env:LOCALAPPDATA 'Programs\SurfCam\SurfCam.exe'
+          if (!(Test-Path $exe)) { throw "installed SurfCam.exe not found at $exe" }
+          "SURFCAM_EXE=$exe" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+
+      - name: Launch-test the installed copy (synthetic camera, usage counts off)
+        env:
+          DO_NOT_TRACK: '1'
+        run: node test/smoke.mjs "$env:SURFCAM_EXE"
+
+      - name: Usage-count test on the installed copy (local listener)
+        env:
+          PUBLIK_SMOKE_REPORT: surfcam-windows-runner-telemetry.json
+        run: node .github/scripts/publik-telemetry-smoke.mjs "$env:SURFCAM_EXE"
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: surfcam-windows-runner-telemetry
+          path: surfcam-windows-runner-telemetry.json
+          if-no-files-found: warn
+          retention-days: 7
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: surfcam-windows-installer
+          path: dist/*.exe
+          compression-level: 0
+          if-no-files-found: error
+          retention-days: 7
