@@ -1,6 +1,6 @@
 {
   "name": "surfcam",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "private": true,
   "description": "Webcam pose controller + HUD wrapped around Subway Surfers (Poki web build)",
   "main": "main.js",
