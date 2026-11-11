@@ -1,6 +1,6 @@
 {
   "name": "surfcam",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "private": true,
   "description": "Webcam pose controller + HUD wrapped around Subway Surfers (Poki web build)",
   "main": "main.js",
@@ -11,8 +11,8 @@
     "start": "electron .",
     "test": "node --test test/*.test.mjs",
     "smoke": "node test/smoke.mjs",
-    "dist:mac": "electron-builder --mac --universal --publish never",
-    "dist:win": "electron-builder --win --x64 --publish never"
+    "dist:mac": "node scripts/publik-bake-token.cjs && electron-builder --mac --universal --publish never",
+    "dist:win": "node scripts/publik-bake-token.cjs && electron-builder --win --x64 --publish never"
   },
   "dependencies": {
     "@mediapipe/tasks-vision": "^1.0.1"
@@ -33,7 +33,10 @@
       "main.js",
       "preload.js",
       "probe.js",
-      "publik-telemetry.cjs",
+      "publik.cjs",
+      "publik-gate.cjs",
+      "publik-gate-preload.cjs",
+      "publik-app-token.txt",
       "renderer/**",
       "models/**",
       "package.json"

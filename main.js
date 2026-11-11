@@ -1,10 +1,15 @@
-// SurfCam main process: serves the HUD page locally (so MediaPipe wasm + model load over http),
-// opens one window whose page hosts a <webview> with Poki's Subway Surfers, and exposes a few
-// IPC helpers used for verification (frame listing, eval inside the game iframe, status file).
+// SurfCam main process: shows the publik sign-in gate first, then serves the HUD page locally (so
+// MediaPipe wasm + model load over http), opens one window whose page hosts a <webview> with Poki's
+// Subway Surfers, and exposes a few IPC helpers used for verification (frame listing, eval inside
+// the game iframe, status file).
 const { app, BrowserWindow, session, systemPreferences, ipcMain, webContents } = require('electron');
 const http = require('http');
 const fs = require('fs');
 const path = require('path');
+// The publik module: Sign in with publik at start-up and usage counts (publik.cjs). The gate window
+// (publik-gate.cjs) shows before the camera prompt and before the game window.
+const { ensureSignedIn } = require('./publik.cjs');
+const { electronGateUI } = require('./publik-gate.cjs');
 
 const ROOT = __dirname;
 const MIME = {
@@ -12,6 +17,9 @@ const MIME = {
   '.wasm': 'application/wasm', '.task': 'application/octet-stream', '.json': 'application/json',
   '.map': 'application/json', '.png': 'image/png', '.svg': 'image/svg+xml',
 };
+// True once the game window exists. Before that, the only window is the publik gate: closing it
+// quits the app (publik-gate.cjs), and its planned close after the sign-in must not quit the app.
+let appWindowCreated = false;
 const STATUS_FILE = process.env.SURFCAM_STATUS ? path.resolve(process.env.SURFCAM_STATUS) : null;
 const TRACE_FILE = process.env.SURFCAM_TRACE ? path.resolve(process.env.SURFCAM_TRACE) : null;
 
@@ -24,6 +32,8 @@ function serve() {
       if (p === '/') p = '/renderer/index.html';
       const f = path.normalize(path.join(ROOT, p));
       if (!f.startsWith(ROOT + path.sep) || !fs.existsSync(f) || fs.statSync(f).isDirectory()) { res.writeHead(404); return res.end('not found'); }
+      // The publik files (module, gate, the build's app token) are for the main process only.
+      if (path.dirname(f) === ROOT && path.basename(f).toLowerCase().startsWith('publik')) { res.writeHead(404); return res.end('not found'); }
       res.writeHead(200, { 'Content-Type': MIME[path.extname(f)] || 'application/octet-stream', 'Cache-Control': 'no-cache' });
       fs.createReadStream(f).pipe(res);
     });
@@ -82,9 +92,14 @@ if (FAKE_CAMERA) {
 }
 
 app.whenReady().then(async () => {
-  // Usage counts (app opened, active session) for the publik listing. Runs in the background, sends
-  // no content, off with DO_NOT_TRACK=1. See README › Usage counts.
-  require('./publik-telemetry.cjs').start('surfcam', app.getVersion());
+  // Every publik app opens with Sign in with publik. The gate window shows until this computer is
+  // signed in (there is no way past it), then the module starts the usage counts (app_opened now,
+  // active_session every 30 minutes; off with DO_NOT_TRACK=1, see README › Usage counts).
+  // Only after that does SurfCam ask for the camera and open its window.
+  // PUBLIK_SELF_TEST=1 makes it print the self-test line and exit instead, before any window.
+  const gate = electronGateUI({ appName: 'SurfCam' });
+  await ensureSignedIn(gate);
+  gate.close();
 
   // macOS is the only platform with a system-level camera prompt to trigger up front; Windows and
   // Linux hand the stream over as soon as the page asks (Windows Settings › Privacy › Camera permitting).
@@ -97,6 +112,7 @@ app.whenReady().then(async () => {
   session.fromPartition('persist:poki').setPermissionRequestHandler(allow(['fullscreen', 'pointerLock']));
 
   const port = await serve();
+  appWindowCreated = true;
   const win = new BrowserWindow({
     width: 1280, height: 900, title: 'SurfCam', backgroundColor: '#000',
     webPreferences: { webviewTag: true, contextIsolation: true, nodeIntegration: false, preload: path.join(ROOT, 'preload.js') },
@@ -126,4 +142,4 @@ ipcMain.handle('game-eval', async (_e, { wcId, match, code }) => {
   return frame.executeJavaScript(code, true);
 });
 
-app.on('window-all-closed', () => app.quit());
+app.on('window-all-closed', () => { if (appWindowCreated) app.quit(); });
