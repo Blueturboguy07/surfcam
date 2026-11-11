@@ -5,15 +5,22 @@
 //   node test/smoke.mjs dist/win-unpacked/SurfCam.exe     # a packaged Windows build
 //   node test/smoke.mjs "/Applications/SurfCam.app/Contents/MacOS/SurfCam"
 //
-// What "ready" proves: the local http server came up, the renderer loaded, getUserMedia handed over
-// a stream, MediaPipe's wasm + the pose model loaded (GPU or the CPU fallback), and the rAF loop is
-// producing frames — i.e. everything except a human in front of the lens.
+// What "ready" proves: the publik sign-in gate let the app through, the local http server came up,
+// the renderer loaded, getUserMedia handed over a stream, MediaPipe's wasm + the pose model loaded
+// (GPU or the CPU fallback), and the rAF loop is producing frames — i.e. everything except a human in
+// front of the lens.
+//
+// The app opens with Sign in with publik. The test points it at a fake publik on 127.0.0.1
+// (test/fake-publik.mjs, through PUBLIK_ORIGIN) that says this computer is signed in, so the gate lets
+// the app through without a window. The app needs its publik app token for that: a packaged build
+// carries it; from source, set PUBLIK_APP_TOKEN or add publik-app-token.txt (see README).
 import { spawn } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
+import { startFakePublik } from './fake-publik.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const binArg = process.argv[2] || process.env.SURFCAM_BIN || '';
@@ -22,12 +29,13 @@ const args = binArg ? [] : [path.resolve(here, '..')];
 const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'surfcam-smoke-'));
 const statusFile = path.join(dir, 'status.json');
 const timeoutMs = Number(process.env.SURFCAM_SMOKE_TIMEOUT || 120000);
+const publik = await startFakePublik({ claimed: true });
+const env = { ...process.env, ...publik.env(dir), SURFCAM_FAKE_CAMERA: '1', SURFCAM_STATUS: statusFile };
+delete env.PUBLIK_SELF_TEST;
+delete env.PUBLIK_API_KEY;
 
-console.log(`smoke: launching ${bin} ${args.join(' ')}`);
-const child = spawn(bin, args, {
-  env: { ...process.env, SURFCAM_FAKE_CAMERA: '1', SURFCAM_STATUS: statusFile },
-  stdio: ['ignore', 'pipe', 'pipe'],
-});
+console.log(`smoke: launching ${bin} ${args.join(' ')} (fake publik on ${publik.origin})`);
+const child = spawn(bin, args, { env, stdio: ['ignore', 'pipe', 'pipe'] });
 let logs = '';
 child.stdout.on('data', (d) => { logs += d; process.stdout.write(d); });
 child.stderr.on('data', (d) => { logs += d; });
@@ -37,7 +45,9 @@ let done = false;
 function finish(code, msg) {
   done = true;
   console.log(msg);
+  console.log(`smoke: publik requests: ${JSON.stringify(publik.requests.map((r) => `${r.method} ${r.url}`))}`);
   try { child.kill(); } catch {}
+  publik.close();
   setTimeout(() => process.exit(code), 500);
 }
 child.on('exit', (code, signal) => { if (!done) finish(1, `SMOKE FAIL: app exited early (code ${code}, signal ${signal})\n${logs.slice(-3000)}`); });
@@ -49,6 +59,7 @@ const tick = setInterval(() => {
     const s = JSON.parse(fs.readFileSync(statusFile, 'utf8'));
     if (s.modelReady && s.fps > 0) {
       clearInterval(tick);
+      if (!publik.requests.some((r) => r.method === 'GET' && r.url === '/api/v1/wallet')) return finish(1, 'SMOKE FAIL: the app ran without the publik sign-in gate (no GET /api/v1/wallet)');
       return finish(0, `SMOKE OK: model ready, ${s.fps} fps, tracking=${s.tracking}, ${Date.now() - started} ms after launch (${process.platform} ${os.release()})`);
     }
   } catch {}

@@ -3,6 +3,11 @@
 #   macOS   -> the universal SurfCam.app, unsigned. The maintainer's Mac signs it with the Developer ID,
 #              notarizes it, staples it and packs the dmg (the certificate lives in that keychain).
 #   Windows -> the normal one-click installer, unsigned, launch-tested on this runner.
+# Both builds carry the publik app token from the repo secret PUBLIK_APP_TOKEN
+# (scripts/publik-bake-token.cjs writes publik-app-token.txt, which is not in git). Both run the
+# publik self-test (.github/scripts/publik-self-test.cjs): the built app starts with PUBLIK_SELF_TEST=1
+# against a fake publik on the runner and must print "publik self-test: ok surfcam <version>", the
+# proof that the sign-in gate is on the start-up path. Nothing in this workflow talks to publikhq.com.
 name: publik build
 
 on:
@@ -28,6 +33,11 @@ jobs:
         with: { node-version: 22, cache: npm }
       - run: npm ci
 
+      - name: Bake the publik app token
+        env:
+          PUBLIK_APP_TOKEN: ${{ secrets.PUBLIK_APP_TOKEN }}
+        run: node scripts/publik-bake-token.cjs
+
       - name: Build the universal app, unsigned
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: 'false'
@@ -45,8 +55,25 @@ jobs:
           echo "architectures: $archs"
           echo "$archs" | grep -q x86_64; echo "$archs" | grep -q arm64
           npx asar list "$app/Contents/Resources/app.asar" > asar-list.txt
-          grep -x '/publik-telemetry.cjs' asar-list.txt
+          grep -x '/publik.cjs' asar-list.txt
+          grep -x '/publik-gate.cjs' asar-list.txt
+          grep -x '/publik-gate-preload.cjs' asar-list.txt
+          grep -x '/publik-app-token.txt' asar-list.txt
           grep -x '/main.js' asar-list.txt
+          if grep -x '/publik-telemetry.cjs' asar-list.txt; then echo "the old telemetry client is still packed"; exit 1; fi
+          node -e 'const t = require("@electron/asar").extractFile(process.argv[1], "publik-app-token.txt").toString().trim(); if (!t.startsWith("pat_")) { console.error("no publik app token in the packed app"); process.exit(1); } console.log("publik app token: packed")' "$app/Contents/Resources/app.asar"
+
+      - name: publik self-test (the universal app against a fake publik)
+        timeout-minutes: 6
+        run: node .github/scripts/publik-self-test.cjs surfcam "$PWD/dist/mac-universal/SurfCam.app/Contents/MacOS/SurfCam" --out publik-self-test-macos.json
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: surfcam-macos-publik-self-test
+          path: publik-self-test-macos.json
+          if-no-files-found: warn
+          retention-days: 7
 
       - name: Pack the app (ditto keeps the symlinks)
         run: ditto -c -k --keepParent dist/mac-universal/SurfCam.app SurfCam-mac-universal-unsigned-app.zip
@@ -70,8 +97,26 @@ jobs:
       - run: npm ci
       - run: npm test
 
+      - name: Bake the publik app token
+        env:
+          PUBLIK_APP_TOKEN: ${{ secrets.PUBLIK_APP_TOKEN }}
+        run: node scripts/publik-bake-token.cjs
+
       - name: Build the installer
         run: npx electron-builder --win --x64 --publish never
+
+      - name: Check the packed app
+        shell: bash
+        run: |
+          set -euo pipefail
+          asar=dist/win-unpacked/resources/app.asar
+          npx asar list "$asar" > asar-list.txt
+          grep -x '[/\\]publik.cjs' asar-list.txt
+          grep -x '[/\\]publik-gate.cjs' asar-list.txt
+          grep -x '[/\\]publik-gate-preload.cjs' asar-list.txt
+          grep -x '[/\\]publik-app-token.txt' asar-list.txt
+          if grep -x '[/\\]publik-telemetry.cjs' asar-list.txt; then echo "the old telemetry client is still packed"; exit 1; fi
+          node -e 'const t = require("@electron/asar").extractFile(process.argv[1], "publik-app-token.txt").toString().trim(); if (!t.startsWith("pat_")) { console.error("no publik app token in the packed app"); process.exit(1); } console.log("publik app token: packed")' "$asar"
 
       - name: Install with the real installer
         shell: pwsh
@@ -85,12 +130,16 @@ jobs:
           if (!(Test-Path $exe)) { throw "installed SurfCam.exe not found at $exe" }
           "SURFCAM_EXE=$exe" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
 
-      - name: Launch-test the installed copy (synthetic camera, usage counts off)
+      - name: publik self-test of the installed copy (fake publik)
+        timeout-minutes: 6
+        run: node .github/scripts/publik-self-test.cjs surfcam "$env:SURFCAM_EXE" --out publik-self-test-windows.json
+
+      - name: Launch-test the installed copy (synthetic camera, fake publik, usage counts off)
         env:
           DO_NOT_TRACK: '1'
         run: node test/smoke.mjs "$env:SURFCAM_EXE"
 
-      - name: Usage-count test on the installed copy (local listener)
+      - name: Sign-in gate and usage-count test on the installed copy (fake publik)
         env:
           PUBLIK_SMOKE_REPORT: surfcam-windows-runner-telemetry.json
         run: node .github/scripts/publik-telemetry-smoke.mjs "$env:SURFCAM_EXE"
@@ -99,7 +148,9 @@ jobs:
         if: always()
         with:
           name: surfcam-windows-runner-telemetry
-          path: surfcam-windows-runner-telemetry.json
+          path: |
+            surfcam-windows-runner-telemetry.json
+            publik-self-test-windows.json
           if-no-files-found: warn
           retention-days: 7
 

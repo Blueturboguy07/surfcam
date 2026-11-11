@@ -66,9 +66,16 @@ jobs:
       - run: npm ci
       - run: npm test
 
+      # The app opens with Sign in with publik: the build carries the publik app token (repo secret).
+      - name: Bake the publik app token
+        env:
+          PUBLIK_APP_TOKEN: ${{ secrets.PUBLIK_APP_TOKEN }}
+        run: node scripts/publik-bake-token.cjs
+
       - name: Build the installer
         run: npx electron-builder --win --x64 --publish never
 
+      # test/smoke.mjs points the app at a fake publik on the runner (PUBLIK_ORIGIN), so the gate lets it through.
       - name: Launch-test the packaged app (synthetic camera)
         run: node test/smoke.mjs dist/win-unpacked/SurfCam.exe
 
