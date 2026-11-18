@@ -15,7 +15,9 @@
     "dist:win": "node scripts/publik-bake-token.cjs && electron-builder --win --x64 --publish never"
   },
   "dependencies": {
-    "@mediapipe/tasks-vision": "^1.0.1"
+    "@mediapipe/tasks-vision": "^1.0.1",
+    "blakejs": "^1.2.1",
+    "electron-updater": "^6.8.11"
   },
   "devDependencies": {
     "electron": "^44.2.0",
@@ -36,6 +38,8 @@
       "publik.cjs",
       "publik-gate.cjs",
       "publik-gate-preload.cjs",
+      "publik-updater.cjs",
+      "publik-update-verify.cjs",
       "publik-app-token.txt",
       "renderer/**",
       "models/**",
@@ -43,15 +47,20 @@
     ],
     "asar": true,
     "publish": {
-      "provider": "github",
-      "owner": "Blueturboguy07",
-      "repo": "surfcam"
+      "provider": "generic",
+      "url": "https://publikhq.com/api/updates/surfcam/"
     },
     "mac": {
       "category": "public.app-category.healthcare-fitness",
       "target": [
         {
           "target": "dmg",
+          "arch": [
+            "universal"
+          ]
+        },
+        {
+          "target": "zip",
           "arch": [
             "universal"
           ]

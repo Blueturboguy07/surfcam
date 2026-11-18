@@ -18,6 +18,9 @@ on:
 permissions:
   contents: read
 
+env:
+  PUBLIK_UPDATES: '0' # the launch tests do not check for updates (publik-updater.cjs)
+
 concurrency:
   group: publik-build-${{ github.ref }}
   cancel-in-progress: true

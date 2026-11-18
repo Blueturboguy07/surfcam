@@ -98,10 +98,17 @@ direct binding once the game is ours; the controller emits lane / jump / duck in
 - `SURFCAM_PROBE=1 npm start` injects a keydown counter into the game iframe, fires a test key,
   and logs what the game frame received.
 
+## Updates
+
+SurfCam checks publik's signed update feed at launch, every 24 hours and from **Check for Updates…** in
+the menu. It downloads an update in the background, verifies it, and asks you to restart. Details, the
+feed contract, key rotation and roll back: [docs/updates.md](docs/updates.md).
+
 ## Releasing
 
-    npm run dist:mac      # signed + notarized universal dmg in dist/ (needs the Developer ID in the keychain,
+    npm run dist:mac      # signed + notarized universal dmg AND zip in dist/ (needs the Developer ID in the keychain,
                           # APPLE_KEYCHAIN_PROFILE=<notarytool profile> and PUBLIK_APP_TOKEN in the environment:
                           # scripts/publik-bake-token.cjs writes it to publik-app-token.txt for the build)
-    git tag vX.Y.Z && git push origin vX.Y.Z   # CI builds + launch-tests the Windows installer and attaches it
-    gh release upload vX.Y.Z dist/*.dmg        # after opening the dmg here and running the smoke test on it
+    git tag vX.Y.Z && git push origin vX.Y.Z   # CI builds + launch-tests the Windows installer, attaches it, adds latest.yml(.sig)
+    gh release upload vX.Y.Z dist/*.dmg dist/*.zip   # after opening the dmg here and running the smoke test on it
+    gh workflow run update-feed.yml -f tag=vX.Y.Z    # adds latest-mac.yml(.sig): the signed macOS update feed

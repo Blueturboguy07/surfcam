@@ -10,6 +10,8 @@ const path = require('path');
 // (publik-gate.cjs) shows before the camera prompt and before the game window.
 const { ensureSignedIn } = require('./publik.cjs');
 const { electronGateUI } = require('./publik-gate.cjs');
+// Signed self-updates (publik-updater.cjs, see docs/updates.md).
+const { startUpdates } = require('./publik-updater.cjs');
 
 const ROOT = __dirname;
 const MIME = {
@@ -92,6 +94,11 @@ if (FAKE_CAMERA) {
 }
 
 app.whenReady().then(async () => {
+  // Updates: checks publik's signed update feed at launch and every 24 h, and adds "Check for Updates…"
+  // to the menu. A test build started with PUBLIK_UPDATER_TEST runs the CI update proof and exits
+  // instead: nothing below starts.
+  if (startUpdates({ slug: 'surfcam', appName: 'SurfCam' }).testHook) return;
+
   // Every publik app opens with Sign in with publik. The gate window shows until this computer is
   // signed in (there is no way past it), then the module starts the usage counts (app_opened now,
   // active_session every 30 minutes; off with DO_NOT_TRACK=1, see README › Usage counts).
