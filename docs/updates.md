@@ -57,8 +57,17 @@ sha512: '<the sha512 of the first file>'
 releaseDate: '2026-11-18T00:00:00.000Z'
 ```
 
-The `.sig` file is a minisign signature of the feed file, made with `tauri signer sign` (base64-wrapped,
-prehashed Ed25519). Its trusted comment names the file (`file:latest.yml`); the app checks that name.
+The `.sig` file is a minisign signature of the feed file. The app accepts these forms:
+
+| Made with | Algorithm | File form |
+|---|---|---|
+| `tauri signer sign` (what `scripts/publik-update-feed.cjs` uses) | `ED`: Ed25519 over BLAKE2b-512 of the file | minisign text, wrapped in base64 |
+| `minisign -S` (minisign 0.8 and later) | `ED`: Ed25519 over BLAKE2b-512 of the file | minisign text |
+| `minisign -S -l` (legacy) | `Ed`: Ed25519 over the file | minisign text |
+
+Electron's crypto has no BLAKE2b-512, so the app computes it with the `blakejs` package. Both algorithms
+therefore work in the app; `-l` is not needed. The trusted comment must name the file (`file:latest.yml` or
+`file:latest-mac.yml`). tauri and minisign write that by default; do not replace it with `-t`.
 
 ## Cut a release
 
