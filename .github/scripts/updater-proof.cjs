@@ -171,7 +171,8 @@ function installedVersion(o) {
 async function waitForInstall(o) {
   const deadline = Date.now() + 300_000;
   while (Date.now() < deadline) {
-    const v = installedVersion(o);
+    let v = null;
+    try { v = installedVersion(o); } catch {} // ShipIt may be swapping the bundle right now
     const busy = isWin && winInstallerRunning();
     if (v === o.new && !busy) return true;
     await sleep(3000);

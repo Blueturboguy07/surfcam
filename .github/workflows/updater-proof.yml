@@ -61,7 +61,9 @@ jobs:
       - run: npm ci
 
       - name: The signature check under Electron's own crypto
-        run: ELECTRON_RUN_AS_NODE=1 "$(node -p "require('electron')")" .github/scripts/updater-electron-crypto.cjs
+        run: |
+          node -e "require('electron')" > /dev/null # the electron package downloads its binary on first use
+          ELECTRON_RUN_AS_NODE=1 "$(node -p "require('electron')")" .github/scripts/updater-electron-crypto.cjs
 
       - name: Bake the publik app token
         env:
@@ -181,7 +183,9 @@ jobs:
       - run: npm ci
 
       - name: The signature check under Electron's own crypto
-        run: ELECTRON_RUN_AS_NODE=1 "$(node -p "require('electron')")" .github/scripts/updater-electron-crypto.cjs
+        run: |
+          node -e "require('electron')" > /dev/null # the electron package downloads its binary on first use
+          ELECTRON_RUN_AS_NODE=1 "$(node -p "require('electron')")" .github/scripts/updater-electron-crypto.cjs
 
       - name: Bake the publik app token
         env:

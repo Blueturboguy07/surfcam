@@ -3,6 +3,7 @@
 // Runs the update signature check under Electron's own Node (ELECTRON_RUN_AS_NODE=1), whose crypto is
 // BoringSSL, not the runner's OpenSSL. It shows which BLAKE2b path the app takes (Node crypto or blakejs)
 // and that Ed25519 verification works there: a good fixture signature passes, a changed byte fails.
+//   node -e "require('electron')" > /dev/null   # the electron package downloads its binary on first use
 //   ELECTRON_RUN_AS_NODE=1 "$(node -p "require('electron')")" .github/scripts/updater-electron-crypto.cjs
 'use strict';
 const fs = require('node:fs');
