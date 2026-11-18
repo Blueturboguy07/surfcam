@@ -99,11 +99,12 @@ function oneByte(src, dst) {
 
 function serve(dir) {
   const requests = [];
+  const root = path.resolve(dir);
   const server = http.createServer((req, res) => {
     const p = decodeURIComponent(new URL(req.url, 'http://x').pathname);
     requests.push(p);
-    const f = path.normalize(path.join(dir, p));
-    if (!f.startsWith(path.resolve(dir) + path.sep) || !fs.existsSync(f) || fs.statSync(f).isDirectory()) { res.writeHead(404); return res.end('not found'); }
+    const f = path.resolve(root, `.${p}`);
+    if (!f.startsWith(root + path.sep) || !fs.existsSync(f) || fs.statSync(f).isDirectory()) { res.writeHead(404); return res.end('not found'); }
     res.writeHead(200, { 'content-type': 'text/plain' });
     fs.createReadStream(f).pipe(res);
   });

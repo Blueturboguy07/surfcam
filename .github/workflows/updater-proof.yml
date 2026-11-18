@@ -43,8 +43,34 @@ jobs:
       - run: npm ci
       - run: npm test
 
+      # Signatures from the reference minisign tool, in both forms the app accepts: legacy (`minisign -S -l`,
+      # Ed25519 over the file) and prehashed (`minisign -S`, Ed25519 over BLAKE2b-512). Checked here with
+      # Node's crypto, then on the macOS and Windows runners with Electron's own crypto.
+      - name: Cross-check with the reference minisign tool
+        run: |
+          set -euo pipefail
+          sudo apt-get install -y -qq minisign > /dev/null
+          minisign -v || true
+          d=minisign-vectors; mkdir -p $d/legacy $d/prehashed
+          minisign -G -W -p $d/minisign.pub -s "$RUNNER_TEMP/minisign.key"
+          for form in legacy prehashed; do cp test/fixtures/update-feed/latest.yml $d/$form/latest.yml; done
+          minisign -S -l -s "$RUNNER_TEMP/minisign.key" -m $d/legacy/latest.yml -x $d/legacy/latest.yml.sig
+          minisign -S -s "$RUNNER_TEMP/minisign.key" -m $d/prehashed/latest.yml -x $d/prehashed/latest.yml.sig
+          rm -f "$RUNNER_TEMP/minisign.key"
+          for form in legacy prehashed; do
+            minisign -V -p $d/minisign.pub -m $d/$form/latest.yml -x $d/$form/latest.yml.sig
+            node scripts/publik-update-feed.cjs verify $d/$form/latest.yml --public-key $d/minisign.pub
+            sed -n 2p $d/$form/latest.yml.sig | base64 -d | head -c 2; echo " <- $form signature algorithm"
+          done
+      - uses: actions/upload-artifact@v4
+        with:
+          name: minisign-vectors
+          path: minisign-vectors
+          retention-days: 7
+
   windows:
     name: Windows — N updates to N+1 (NSIS, unsigned)
+    needs: unit
     runs-on: windows-latest
     timeout-minutes: 45
     defaults:
@@ -60,10 +86,15 @@ jobs:
         with: { node-version: 22, cache: npm }
       - run: npm ci
 
-      - name: The signature check under Electron's own crypto
+      - uses: actions/download-artifact@v4
+        with:
+          name: minisign-vectors
+          path: minisign-vectors
+
+      - name: The signature check under Electron's own crypto (tauri, minisign legacy, minisign prehashed)
         run: |
           node -e "require('electron')" > /dev/null # the electron package downloads its binary on first use
-          ELECTRON_RUN_AS_NODE=1 "$(node -p "require('electron')")" .github/scripts/updater-electron-crypto.cjs
+          ELECTRON_RUN_AS_NODE=1 "$(node -p "require('electron')")" .github/scripts/updater-electron-crypto.cjs minisign-vectors
 
       - name: Bake the publik app token
         env:
@@ -168,6 +199,7 @@ jobs:
 
   macos:
     name: macOS — N updates to N+1 (Squirrel.Mac, runner-made identity)
+    needs: unit
     runs-on: macos-latest
     timeout-minutes: 60
     env:
@@ -182,10 +214,15 @@ jobs:
         with: { node-version: 22, cache: npm }
       - run: npm ci
 
-      - name: The signature check under Electron's own crypto
+      - uses: actions/download-artifact@v4
+        with:
+          name: minisign-vectors
+          path: minisign-vectors
+
+      - name: The signature check under Electron's own crypto (tauri, minisign legacy, minisign prehashed)
         run: |
           node -e "require('electron')" > /dev/null # the electron package downloads its binary on first use
-          ELECTRON_RUN_AS_NODE=1 "$(node -p "require('electron')")" .github/scripts/updater-electron-crypto.cjs
+          ELECTRON_RUN_AS_NODE=1 "$(node -p "require('electron')")" .github/scripts/updater-electron-crypto.cjs minisign-vectors
 
       - name: Bake the publik app token
         env:
