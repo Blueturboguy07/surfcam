@@ -267,12 +267,17 @@ if on_draft "$ZIP"; then
   ok "$ZIP is on the draft"
 else
   if [ ! -f "$STATE/zip-made" ]; then
+    if [ -d "$MAC" ] && [ "$(cat "$STATE/mac-from-run" 2>/dev/null)" != "$CI_RUN" ]; then
+      rm -r "$MAC"
+      ok "deleted a local app of an earlier CI run"
+    fi
     if [ ! -d "$APP_PATH" ]; then
       rm -f "$STATE/mac-signed" "$STATE/notary-app" "$STATE/mac-stapled"
       need_mb 1000 "the unsigned app (download + unpack)"
       gh run download "$CI_RUN" -R "$REPO" -n surfcam-mac-universal-unsigned-app -D "$WORK/ci-mac"
       mkdir -p "$MAC"
       ditto -x -k "$WORK/ci-mac/SurfCam-mac-universal-unsigned-app.zip" "$MAC"
+      echo "$CI_RUN" > "$STATE/mac-from-run"
       rm -f "$WORK/ci-mac/SurfCam-mac-universal-unsigned-app.zip"
       rmdir "$WORK/ci-mac"
       ok "unpacked the CI app: $(du -sm "$APP_PATH" | cut -f1) MB"
@@ -283,7 +288,7 @@ else
       if [ ! -d "$WORK/tools/node_modules/@electron/osx-sign" ]; then
         npm install --prefix "$WORK/tools" --no-audit --no-fund --loglevel=error "@electron/osx-sign@$osx_v" > /dev/null
       fi
-      node "$ROOT/scripts/publik-mac-sign.cjs" "$APP_PATH" "$ENT" "$IDENTITY" "$WORK/tools/node_modules/@electron/osx-sign"
+      node "$ROOT/scripts/publik-mac-sign.cjs" "$APP_PATH" "$ENT" "$IDENTITY" "$WORK/tools/node_modules/@electron/osx-sign" || die "signing the app failed"
       codesign --verify --deep --strict "$APP_PATH" || die "the signed app does not verify"
       mark mac-signed
     fi

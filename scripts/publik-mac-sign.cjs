@@ -12,9 +12,10 @@ if (!app || !entitlements || !identity || !osxSign) {
   console.error('usage: node scripts/publik-mac-sign.cjs <app> <entitlements> <identity> <@electron/osx-sign dir>');
   process.exit(2);
 }
-const { sign } = require(path.resolve(osxSign));
+// signAsync returns a promise (sign is the callback form).
+const { signAsync } = require(path.resolve(osxSign));
 
-sign({
+signAsync({
   app,
   platform: 'darwin',
   type: 'distribution',
