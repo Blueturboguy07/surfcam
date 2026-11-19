@@ -71,31 +71,40 @@ therefore work in the app; `-l` is not needed. The trusted comment must name the
 
 ## Cut a release
 
-1. Set the new version in `package.json`. Commit.
-2. On the maintainer's Mac, run `npm run dist:mac`. It makes the signed, notarized universal **dmg and zip**
-   in `dist/`. (The zip is new: Squirrel.Mac installs from it.)
-   - If the app comes from `publik-build.yml` instead: sign, notarize and staple the app, then make the zip
-     from the stapled app: `ditto -c -k --sequesterRsrc --keepParent SurfCam.app SurfCam-<version>-mac-universal.zip`.
-3. Tag and push: `git tag vX.Y.Z && git push origin vX.Y.Z`. `release.yml` builds and tests the Windows
-   installer, puts it on the release, then runs `update-feed.yml`, which adds `latest.yml` and its `.sig`.
-4. Upload the mac files: `gh release upload vX.Y.Z dist/*.dmg dist/*.zip`.
-5. Make the mac feed: run **Actions › Update feed** with the tag (or
-   `gh workflow run update-feed.yml -f tag=vX.Y.Z`). It adds `latest-mac.yml` and its `.sig`. It adds only
-   missing feed files. Use **force** after you replace an installer file.
-6. Check that the release holds the four feed files.
-
-For a publik release (a draft that publik scans): put all the installer files on the draft, then run
-**Update feed** for the draft's tag BEFORE the scan. The scan then sees the feed files too.
-
-The update key is needed only in step 5 (and 3): `update-feed.yml` reads the repo secrets
-`PUBLIK_UPDATE_KEY` and `PUBLIK_UPDATE_KEY_PASSWORD`. `publik-build.yml` builds the installers and does
-not need the key. Without CI, run the same script on a Mac that has the key in its keychain:
+One command on the maintainer's Mac (it holds the Developer ID certificate, the notarytool profile
+`publik` and the update key in its keychain):
 
 ```sh
-PUBLIK_UPDATE_KEY="$(security find-generic-password -s publik-update-key -a mann-private -w)" \
-PUBLIK_UPDATE_KEY_PASSWORD="$(security find-generic-password -s publik-update-key -a mann-password -w)" \
-node scripts/publik-update-feed.cjs release --tag vX.Y.Z --app surfcam --repo Blueturboguy07/surfcam
+npm version 0.1.4 --no-git-tag-version   # package.json + package-lock.json
+git commit -am "Release 0.1.4" && git push origin main
+scripts/publik-release.sh 0.1.4
 ```
+
+`scripts/publik-release.sh <version>` does the rest and stops at the first failed check, before it publishes:
+
+| Step | What it does |
+|---|---|
+| 1. Checks | on `main`, clean, pushed; `package.json` and `package-lock.json` = `<version>`; newer than the latest release; tag `v<version>` free (a draft `v<version>` is resumed) |
+| 2. Build | runs `publik-build.yml` on the commit: the unsigned universal app and the Windows installer, both with the publik app token and launch- and self-tested |
+| 3. macOS app | signs it with `scripts/publik-mac-sign.cjs` (`@electron/osx-sign`: inner binaries first, hardened runtime, `build/entitlements.mac.plist`), notarizes, staples, makes the update zip from the stapled app |
+| 4. macOS dmg | `publik-dmg.yml` packs the stapled app into the dmg (electron-builder, `--prepackaged`); the Mac signs, notarizes and staples the dmg |
+| 5. Windows | the installer from step 2 (not code-signed) |
+| 6. Feed | `SHA256SUMS.txt`; `latest.yml` and `latest-mac.yml` with absolute GitHub URLs, signed with the update key from the keychain (`scripts/publik-update-feed.cjs`) |
+| 7. Verify | uploads all files to a DRAFT release, deletes the local copies, downloads each file back: feed signatures with the app's public key, sha512 and sha256, versions (Info.plist, exe = feed), `codesign`, `spctl`, `stapler`, the designated requirement, the app token (`scripts/publik-release-check.cjs`) |
+| 8. Publish | publishes the draft as the latest release; checks that each file answers 200 |
+
+- `--no-publish` stops after step 7 and leaves a complete, verified draft.
+- Run it again after a failure: it resumes. State: `$TMPDIR/publik-release-surfcam-<version>/state`
+  (`PUBLIK_RELEASE_WORK` moves it). A step that is done is not done again.
+- It starts no app, prints no secret, writes no secret to disk, and keeps one copy of each file on disk.
+- It cannot: publish a release whose files fail a check, replace a published release, or sign the Windows
+  installer (SurfCam has no Windows code-signing certificate).
+- `release.yml` runs when the tag appears; its guard sees the installer on the release and builds nothing.
+- publik scans the release at intake and serves it after a clean scan. Then the apps update (the live
+  update proof below shows it).
+
+Without the script, the feed alone: `gh workflow run update-feed.yml -f tag=vX.Y.Z` (repo secrets
+`PUBLIK_UPDATE_KEY`, `PUBLIK_UPDATE_KEY_PASSWORD`; it adds only missing feed files, **force** replaces them).
 
 ## Roll back
 
@@ -137,6 +146,42 @@ build reads these environment variables:
 
 Test versions are `0.0.0-updtest.*`. A test feed that the real key signs is therefore never newer than a
 real release. The proof puts N+1 on a prerelease with a `v0.0.0-updtest.*` tag and deletes it at the end.
+
+## Live update proof
+
+`.github/workflows/live-update-proof.yml` (**Actions › Live update proof**, inputs `from_tag` and
+`expect_version`) proves the update of the REAL release with the LIVE publik feed, as a user sees it:
+
+```sh
+gh workflow run live-update-proof.yml -f from_tag=v0.1.3 -f expect_version=0.1.4
+```
+
+Jobs: macOS Apple silicon (answers "Restart Now"), macOS Apple silicon (answers "Later", then quits and
+opens the app), macOS Intel (Restart Now), Windows x64 (Restart Now, Later). Each job
+(`.github/scripts/live-update-proof.cjs`):
+
+1. downloads `from_tag` from GitHub and checks it against that release's signed feed;
+2. macOS: sets the quarantine flag, checks Gatekeeper (`spctl`: Notarized Developer ID), copies the app
+   with Finder and marks it as moved by the user (quarantine flag 0x0100, which a user's Finder drag sets
+   and a scripted copy does not; without it macOS runs the app from a read-only translocated copy). On the
+   first start it answers Gatekeeper's question with **Open**. Windows: runs the installer silently;
+3. macOS: writes real TCC grants (camera, microphone, screen capture, accessibility) for
+   `com.publik.surfcam` into the user and the system TCC database, bound to the app's designated
+   requirement (`.github/scripts/live-proof-root.sh`, the only file that uses `sudo`);
+4. starts the app normally. No test hook, no feed override, nobody signs in: SurfCam stays on its publik
+   sign-in window and never opens the camera;
+5. waits for the app's own update check. `expect_version` = the from version: the app must find no update
+   and stay. A newer `expect_version`: the app must download it, ask "Restart now?", and run
+   `expect_version` after the answer;
+6. checks the version on disk and in the running app, the designated requirement, Gatekeeper, and that
+   each stored TCC requirement is still satisfied (a runner cannot show a consent prompt: this is the check
+   tccd makes before it uses a grant);
+7. clicks **Check for Updates…** and reads "You’re up to date." (on Windows, when the hidden menu bar
+   can be driven).
+
+Logs, UI dumps, screenshots and `summary.json` are the run's artifacts. A failed check fails the job.
+`test/publik-updater-ui.test.mjs` tests the 24-hour check, `PUBLIK_UPDATES=0`, the menu item and the
+restart question with fake timers.
 
 ## Copy to another Electron app
 

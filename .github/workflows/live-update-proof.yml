@@ -1,0 +1,95 @@
+# Live update proof: a user's SurfCam updating itself from the LIVE publik feed, on real runners.
+# For each OS SurfCam ships (macOS Apple silicon, macOS Intel: the universal app; Windows x64), the job
+# downloads the published release `from_tag` from GitHub, installs it as a user does, starts it the normal
+# way (release build: no test hook, no feed override, no sign-in, the camera view never opens) and lets it
+# ask https://publikhq.com/api/updates/surfcam/. Then (.github/scripts/live-update-proof.cjs):
+#   expect_version = the from version: the app must find no update and stay as it is.
+#   expect_version = a newer version: the app must download it, ask "Restart now?", and after the answer
+#     ("restart": Restart Now; "later": Later, then the user quits and opens the app) run expect_version.
+# macOS also gets REAL TCC grants (camera, microphone, screen capture, accessibility) bound to the app's
+# designated requirement before the update, and checks after it that each stored requirement is still
+# satisfied (the check tccd makes; a runner cannot show a consent prompt). Each job clicks
+# "Check for Updates…" through the UI and reads the answer. Logs, UI dumps and screenshots: the artifacts.
+# A failed check fails the job. Run it by hand: Actions › Live update proof, or
+#   gh workflow run live-update-proof.yml -f from_tag=v0.1.3 -f expect_version=0.1.4
+name: Live update proof
+
+on:
+  workflow_dispatch:
+    inputs:
+      from_tag:
+        description: The published release to install first (N), e.g. v0.1.3
+        required: true
+        type: string
+      expect_version:
+        description: The version the app must run at the end (N+1 for an update, N for "no update")
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: live-update-proof-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  macos:
+    name: macOS ${{ matrix.arch }} (${{ matrix.answer }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { runner: macos-latest, arch: arm64, answer: restart }
+          - { runner: macos-latest, arch: arm64, answer: later }
+          - { runner: macos-15-intel, arch: x64, answer: restart }
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22 }
+      - name: Runner
+        run: sw_vers; uname -m; spctl --status || true; csrutil status || true
+      - name: Live update proof
+        env:
+          FROM_TAG: ${{ inputs.from_tag }}
+          EXPECT: ${{ inputs.expect_version }}
+          ANSWER: ${{ matrix.answer }}
+        run: node .github/scripts/live-update-proof.cjs --from-tag "$FROM_TAG" --expect "$EXPECT" --answer "$ANSWER" --repo "$GITHUB_REPOSITORY" --out live-proof
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: live-update-proof-macos-${{ matrix.arch }}-${{ matrix.answer }}
+          path: live-proof
+          if-no-files-found: warn
+          retention-days: 30
+
+  windows:
+    name: Windows x64 (${{ matrix.answer }})
+    strategy:
+      fail-fast: false
+      matrix:
+        answer: [restart, later]
+    runs-on: windows-latest
+    timeout-minutes: 60
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22 }
+      - name: Live update proof
+        env:
+          FROM_TAG: ${{ inputs.from_tag }}
+          EXPECT: ${{ inputs.expect_version }}
+          ANSWER: ${{ matrix.answer }}
+        run: node .github/scripts/live-update-proof.cjs --from-tag "$FROM_TAG" --expect "$EXPECT" --answer "$ANSWER" --repo "$GITHUB_REPOSITORY" --out live-proof
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: live-update-proof-windows-${{ matrix.answer }}
+          path: live-proof
+          if-no-files-found: warn
+          retention-days: 30

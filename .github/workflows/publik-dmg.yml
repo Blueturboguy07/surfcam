@@ -1,0 +1,75 @@
+# publik dmg: packs the macOS dmg of a SurfCam release from the update zip on its DRAFT release.
+# scripts/publik-release.sh starts it after it uploaded SurfCam-<version>-mac-universal.zip: the app that
+# the maintainer's Mac signed with the Developer ID, notarized and stapled. electron-builder's dmg target
+# packs that app as it is (--prepackaged: no rebuild, no signing, no change to the app). The dmg leaves as
+# a workflow artifact; the maintainer's Mac signs, notarizes and staples it, then uploads it to the draft.
+name: publik dmg
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: The draft release that holds the update zip, e.g. v0.1.4
+        required: true
+        type: string
+
+permissions:
+  contents: write # GitHub shows a draft release only to a token that can write; this job writes nothing
+
+concurrency:
+  group: publik-dmg-${{ inputs.tag }}
+  cancel-in-progress: true
+
+jobs:
+  dmg:
+    name: macOS dmg (from the stapled app)
+    runs-on: macos-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: npm }
+      - run: npm ci
+
+      - name: The stapled app from the draft release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ inputs.tag }}
+        run: |
+          set -euo pipefail
+          v="${TAG#v}"
+          want="$(node -p "require('./package.json').version")"
+          echo "release $TAG, package.json $want"; test "$v" = "$want"
+          gh release download "$TAG" -R "$GITHUB_REPOSITORY" --pattern "SurfCam-$v-mac-universal.zip" --dir in
+          mkdir app
+          ditto -x -k "in/SurfCam-$v-mac-universal.zip" app
+          codesign --verify --deep --strict app/SurfCam.app
+          codesign -dvv app/SurfCam.app 2>&1 | grep -E '^(Authority|TeamIdentifier|Timestamp|Identifier)='
+          xcrun stapler validate app/SurfCam.app
+          echo "VERSION=$v" >> "$GITHUB_ENV"
+
+      - name: Pack the dmg (electron-builder, the app as it is)
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+        run: npx electron-builder --mac dmg --universal --prepackaged app/SurfCam.app --publish never -c.mac.identity=null -c.mac.notarize=false -c.dmg.sign=false
+
+      - name: Check the dmg
+        run: |
+          set -euo pipefail
+          dmg="dist/SurfCam-$VERSION-mac-universal.dmg"
+          ls -l dist
+          hdiutil attach "$dmg" -nobrowse -noautoopen -readonly -mountpoint mnt
+          test -L mnt/Applications
+          test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' mnt/SurfCam.app/Contents/Info.plist)" = "$VERSION"
+          codesign --verify --deep --strict mnt/SurfCam.app
+          xcrun stapler validate mnt/SurfCam.app
+          diff <(codesign -d -r- app/SurfCam.app 2>&1 | grep designated) <(codesign -d -r- mnt/SurfCam.app 2>&1 | grep designated)
+          hdiutil detach mnt
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: surfcam-dmg
+          path: dist/SurfCam-${{ env.VERSION }}-mac-universal.dmg
+          compression-level: 0
+          if-no-files-found: error
+          retention-days: 3
