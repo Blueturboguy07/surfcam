@@ -75,6 +75,12 @@ APP_PATH="$MAC/$APP.app"
 mkdir -p "$STATE" "$OUT"
 mark() { touch "$STATE/$1"; }
 done_() { [ -f "$STATE/$1" ]; }
+reset_state() { # the work of another commit is not reused: its files go, its state goes
+  local f
+  for f in "$STATE"/*; do [ ! -f "$f" ] || rm "$f"; done
+  for f in "$OUT"/*; do [ ! -f "$f" ] || rm "$f"; done
+  for f in "$OUT/feed" "$MAC" "$WORK/verify"; do [ ! -d "$f" ] || rm -r "$f"; done
+}
 
 # ------------------------------------------------------------------ 1. checks
 say "1. checks ($TAG, work folder $WORK)"
@@ -89,6 +95,11 @@ git fetch --quiet origin "$BRANCH" --tags
 SHA="$(git rev-parse HEAD)"
 [ "$SHA" = "$(git rev-parse "origin/$BRANCH")" ] || die "HEAD is not origin/$BRANCH: push (or pull) first"
 ok "on $BRANCH at $SHA, clean, pushed"
+if [ "$(cat "$STATE/sha" 2>/dev/null)" != "$SHA" ]; then
+  [ -z "$(ls -A "$STATE")" ] || ok "the work folder holds the work of another commit: starting again for $SHA"
+  reset_state
+  echo "$SHA" > "$STATE/sha"
+fi
 pkg_v="$(node -p "require('./package.json').version")"
 lock_v="$(node -p "const l = require('./package-lock.json'); l.version + ' ' + l.packages[''].version")"
 [ "$pkg_v" = "$VERSION" ] || die "package.json says $pkg_v. Bump first: npm version $VERSION --no-git-tag-version, then commit and push"
@@ -105,7 +116,13 @@ RELEASE_ID="$(gh api "repos/$REPO/releases" --paginate --jq ".[] | select(.tag_n
 if [ -n "$RELEASE_ID" ]; then
   rel="$(gh api "repos/$REPO/releases/$RELEASE_ID" --jq '"\(.draft) \(.target_commitish)"')"
   [ "${rel%% *}" = true ] || die "a published release $TAG exists already"
-  [ "${rel#* }" = "$SHA" ] || die "the draft $TAG targets ${rel#* }, not $SHA: delete that draft or check out its commit"
+  if [ "${rel#* }" != "$SHA" ]; then
+    # A draft without files (a run that stopped before its first upload) moves to this commit.
+    n="$(gh api "repos/$REPO/releases/$RELEASE_ID" --jq '.assets | length')"
+    [ "$n" = 0 ] || die "the draft $TAG targets ${rel#* } and holds $n files, not $SHA: delete that draft or check out its commit"
+    gh api -X PATCH "repos/$REPO/releases/$RELEASE_ID" -f target_commitish="$SHA" > /dev/null
+    ok "the empty draft $TAG now targets $SHA"
+  fi
   ok "the tag is free; resuming the draft $TAG (release $RELEASE_ID)"
 else
   ok "the tag $TAG is free"
@@ -185,8 +202,9 @@ $APP 0.1.3 and later update themselves: $APP asks publik for a new version when 
 Update feed: \`latest.yml\`, \`latest-mac.yml\` and their \`.sig\` files (docs/updates.md).
 What is sent and how to turn it off: https://publikhq.com/skills/telemetry.md
 EOF
-  gh release create "$TAG" -R "$REPO" --draft --target "$SHA" --title "$APP $VERSION" --notes-file "$notes" > /dev/null
-  RELEASE_ID="$(gh api "repos/$REPO/releases" --paginate --jq ".[] | select(.tag_name == \"$TAG\") | .id")"
+  # The id comes from the answer itself: the list of releases can show a new draft only seconds later.
+  RELEASE_ID="$(gh api -X POST "repos/$REPO/releases" -f tag_name="$TAG" -f target_commitish="$SHA" -f name="$APP $VERSION" \
+    -F draft=true -F body=@"$notes" --jq .id)"
   [ -n "$RELEASE_ID" ] || die "the draft $TAG was not created"
   ok "draft release $TAG created (release $RELEASE_ID, target $SHA)"
 }
