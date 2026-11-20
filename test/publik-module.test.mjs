@@ -62,6 +62,7 @@ test('the gate shows Sign in with publik until the wallet says signed in, then s
   assert.equal(body.app_token, FAKE_APP_TOKEN);
   const cred = JSON.parse(fs.readFileSync(m.credentialPath(), 'utf8'));
   assert.equal(cred.key, FAKE_KEY);
+  assert.equal(cred.choice ?? null, null, 'SurfCam uses no AI: the gate stores no choice');
   if (process.platform !== 'win32') assert.equal(fs.statSync(m.credentialPath()).mode & 0o777, 0o600);
 
   for (let i = 0; i < 50 && !publik.requests.some((r) => r.url === '/api/v1/telemetry'); i++) await new Promise((r) => setTimeout(r, 100));
@@ -92,6 +93,32 @@ test('offline: "publik is not reachable. Check your connection." with Retry, and
   assert.equal(shown[0].title, 'Sign in with publik');
   assert.equal(shown[0].body, 'publik is not reachable. Check your connection.');
   assert.deepEqual(shown[0].buttons, [{ action: 'retry', label: 'Retry' }]);
+});
+
+test('signed in with no plan and no balance: no screen at all, the app opens at once', async () => {
+  publik.state.claimed = true; // the fake wallet has plan "none" and balance 0
+  const shown = [];
+  const ui = { show(screen) { shown.push(screen); return new Promise(() => {}); }, openUrl() { throw new Error('no link may open'); } };
+  const gate = await m.ensureSignedIn(ui);
+  assert.equal(gate.wallet.claim_state, 'claimed');
+  assert.equal(gate.wallet.plan.kind, 'none');
+  assert.equal(gate.wallet.balance_micros, 0);
+  assert.equal(gate.choice, null);
+  assert.deepEqual(shown, [], 'no pay screen at start');
+  assert.equal(JSON.parse(fs.readFileSync(m.credentialPath(), 'utf8')).choice ?? null, null, 'no choice stored');
+});
+
+test('a stored own_key choice is kept as it is', async () => {
+  publik.state.claimed = true;
+  m.setChoice('own_key');
+  const shown = [];
+  const ui = { show(screen) { shown.push(screen); return new Promise(() => {}); }, openUrl() { throw new Error('no link may open'); } };
+  const gate = await m.ensureSignedIn(ui);
+  assert.equal(gate.wallet.claim_state, 'claimed');
+  assert.deepEqual(shown, []);
+  const cred = JSON.parse(fs.readFileSync(m.credentialPath(), 'utf8'));
+  assert.equal(cred.choice, 'own_key');
+  assert.equal(cred.key, FAKE_KEY);
 });
 
 test('PUBLIK_SELF_TEST=1 prints the self-test line after a real GET /wallet and exits 0', async () => {
